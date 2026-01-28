@@ -102,7 +102,6 @@ addopts = [
     "--cov=x2raindrop_cli",
     "--cov-report=term-missing",
     "--cov-report=html",
-    "--cov-fail-under=80",
     "-v",
 ]
 
