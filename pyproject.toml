@@ -1,6 +1,6 @@
 [project]
 name = "x2raindrop-cli"
-version = "1.0.0"
+version = "1.0.1"
 description = "CLI tool to sync X (Twitter) Bookmarks to Raindrop.io"
 authors = [
     {name = "Lukas Wolfsteiner",email = "lukas@wolfsteiner.media"}
