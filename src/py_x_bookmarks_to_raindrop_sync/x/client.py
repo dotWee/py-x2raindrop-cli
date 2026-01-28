@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+import time
 from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
@@ -38,6 +39,11 @@ URL_PATTERN = re.compile(r"https?://(?!t\.co)[^\s]+")
 
 # Maximum results per page (X API limit)
 MAX_RESULTS_PER_PAGE = 100
+
+# Rate limit retry settings
+DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60  # Default wait if no header
+MAX_RATE_LIMIT_WAIT_SECONDS = 900  # Maximum wait (15 minutes)
+MAX_RETRIES = 5  # Maximum number of retries for rate limits
 
 
 class XClientProtocol(Protocol):
@@ -121,13 +127,46 @@ class XClient:
         """Close the HTTP client."""
         self._http_client.close()
 
+    def _get_rate_limit_wait_time(self, response: httpx.Response) -> int:
+        """Extract wait time from rate limit response headers.
+
+        Args:
+            response: HTTP response with rate limit headers.
+
+        Returns:
+            Number of seconds to wait before retrying.
+        """
+        # Try x-rate-limit-reset header (Unix timestamp)
+        reset_timestamp = response.headers.get("x-rate-limit-reset")
+        if reset_timestamp:
+            try:
+                reset_time = int(reset_timestamp)
+                wait_seconds = max(0, reset_time - int(time.time()))
+                # Add a small buffer
+                return min(wait_seconds + 5, MAX_RATE_LIMIT_WAIT_SECONDS)
+            except (ValueError, TypeError):
+                pass
+
+        # Try Retry-After header (seconds or HTTP date)
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return min(int(retry_after), MAX_RATE_LIMIT_WAIT_SECONDS)
+            except (ValueError, TypeError):
+                pass
+
+        # Default wait time
+        return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
     def _make_request(
         self,
         method: str,
         url: str,
         **kwargs: Any,
     ) -> httpx.Response:
-        """Make an HTTP request and track it.
+        """Make an HTTP request with automatic rate limit retry.
+
+        Handles 429 Too Many Requests errors by waiting and retrying.
 
         Args:
             method: HTTP method (GET, POST, DELETE, etc.)
@@ -138,19 +177,63 @@ class XClient:
             HTTP response
 
         Raises:
-            httpx.HTTPStatusError: If the request fails.
+            httpx.HTTPStatusError: If the request fails after retries.
         """
         self._request_count += 1
-        logger.debug(
-            "Making X API request",
-            method=method,
-            url=url,
-            request_number=self._request_count,
-        )
+        retries = 0
 
-        response = self._http_client.request(method, url, **kwargs)
-        response.raise_for_status()
-        return response
+        while True:
+            logger.debug(
+                "Making X API request",
+                method=method,
+                url=url,
+                request_number=self._request_count,
+                retry=retries,
+            )
+
+            response = self._http_client.request(method, url, **kwargs)
+
+            # Check for rate limit error
+            if response.status_code == 429:
+                retries += 1
+                if retries > MAX_RETRIES:
+                    logger.error(
+                        "Max retries exceeded for rate limit",
+                        retries=retries,
+                        method=method,
+                        url=url,
+                    )
+                    response.raise_for_status()
+
+                wait_seconds = self._get_rate_limit_wait_time(response)
+
+                logger.warning(
+                    "Rate limit hit (429 Too Many Requests). Waiting before retry...",
+                    wait_seconds=wait_seconds,
+                    retry=retries,
+                    max_retries=MAX_RETRIES,
+                    method=method,
+                    url=url,
+                )
+
+                # Log remaining rate limit info if available
+                remaining = response.headers.get("x-rate-limit-remaining")
+                limit = response.headers.get("x-rate-limit-limit")
+                if remaining or limit:
+                    logger.info(
+                        "Rate limit info",
+                        remaining=remaining,
+                        limit=limit,
+                    )
+
+                # Wait before retrying
+                logger.info(f"Sleeping for {wait_seconds} seconds...")
+                time.sleep(wait_seconds)
+                continue
+
+            # Success or other error
+            response.raise_for_status()
+            return response
 
     def get_authenticated_user_id(self) -> str:
         """Get the authenticated user's ID.
