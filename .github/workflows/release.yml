@@ -1,0 +1,51 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Get the previous tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "First release - no previous tag found"
+            echo "NOTES<<EOF" >> $GITHUB_OUTPUT
+            echo "## Initial Release" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "First release of x2raindrop-cli." >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "Generating changelog from $PREVIOUS_TAG to ${{ github.ref_name }}"
+            echo "NOTES<<EOF" >> $GITHUB_OUTPUT
+            echo "## What's Changed" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..${{ github.ref_name }} >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "${{ steps.notes.outputs.NOTES }}" \
+            --verify-tag
