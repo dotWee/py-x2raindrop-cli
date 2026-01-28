@@ -105,6 +105,37 @@ class OAuth2Token:
             scope=data["scope"],
         )
 
+    @classmethod
+    def from_access_token(
+        cls,
+        access_token: str,
+        token_type: str = "bearer",
+        expires_in_days: int = 365,
+    ) -> OAuth2Token:
+        """Create from a direct access token.
+
+        Use this when you have an access token from another source
+        (e.g., X Developer Portal, automation scripts).
+
+        NOTE: Direct tokens typically cannot be refreshed and may have
+        different expiration behavior than PKCE-obtained tokens.
+
+        Args:
+            access_token: The access token string.
+            token_type: Token type (default: "bearer").
+            expires_in_days: Assumed expiration in days (default: 365).
+
+        Returns:
+            OAuth2Token instance.
+        """
+        return cls(
+            access_token=access_token,
+            refresh_token=None,  # Direct tokens typically don't have refresh tokens
+            token_type=token_type,
+            expires_at=datetime.now() + timedelta(days=expires_in_days),
+            scope="",  # Unknown scope for direct tokens
+        )
+
 
 def generate_pkce_codes() -> PKCECodes:
     """Generate PKCE code verifier and challenge.

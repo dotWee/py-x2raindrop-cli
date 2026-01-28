@@ -25,16 +25,14 @@ class TestGetDefaultPaths:
     """Tests for default path functions."""
 
     def test_get_default_config_dir(self) -> None:
-        """Test default config directory."""
+        """Test default config directory (for state/tokens)."""
         config_dir = get_default_config_dir()
-        assert config_dir.name == "py-x-bookmarks-to-raindrop-sync"
-        assert ".config" in str(config_dir)
+        assert config_dir.name == ".x2raindrop"
 
     def test_get_default_config_path(self) -> None:
-        """Test default config file path."""
+        """Test default config file path (in project root)."""
         config_path = get_default_config_path()
         assert config_path.name == "config.toml"
-        assert config_path.parent.name == "py-x-bookmarks-to-raindrop-sync"
 
 
 class TestCreateDefaultConfig:
@@ -75,7 +73,10 @@ class TestCreateDefaultConfig:
 
         content = config_path.read_text()
 
-        assert "YOUR_X_CLIENT_ID" in content
+        # X section has empty placeholders for both auth methods
+        assert "access_token" in content
+        assert "client_id" in content
+        # Raindrop still has placeholder
         assert "YOUR_RAINDROP_TOKEN" in content
 
 
@@ -92,19 +93,35 @@ class TestXSettings:
         assert settings.client_id == "test_client_id"
         assert settings.client_secret == "test_secret"
 
-    def test_default_redirect_uri(self, monkeypatch: MonkeyPatch) -> None:
-        """Test default redirect URI."""
+    def test_direct_access_token(self, monkeypatch: MonkeyPatch) -> None:
+        """Test direct access token authentication."""
+        monkeypatch.setenv("X_ACCESS_TOKEN", "test_access_token")
+
+        settings = XSettings()
+
+        assert settings.access_token == "test_access_token"
+        assert settings.has_direct_token() is True
+        assert settings.get_direct_token() == "test_access_token"
+        assert settings.can_use_pkce_flow() is False
+
+    def test_pkce_flow_with_client_id(self, monkeypatch: MonkeyPatch) -> None:
+        """Test PKCE flow requires client_id."""
         monkeypatch.setenv("X_CLIENT_ID", "test_id")
 
+        settings = XSettings()
+
+        assert settings.can_use_pkce_flow() is True
+        assert settings.has_direct_token() is False
+
+    def test_default_redirect_uri(self) -> None:
+        """Test default redirect URI."""
         settings = XSettings()
 
         assert "127.0.0.1" in settings.redirect_uri
         assert "callback" in settings.redirect_uri
 
-    def test_default_scopes(self, monkeypatch: MonkeyPatch) -> None:
+    def test_default_scopes(self) -> None:
         """Test default scopes include required ones."""
-        monkeypatch.setenv("X_CLIENT_ID", "test_id")
-
         settings = XSettings()
 
         assert "bookmark.read" in settings.scopes

@@ -24,18 +24,18 @@ def get_default_config_dir() -> Path:
     """Get the default configuration directory.
 
     Returns:
-        Path to the config directory (~/.config/py-x-bookmarks-to-raindrop-sync/).
+        Path to the data directory (.x2raindrop/ in the current working directory).
     """
-    return Path.home() / ".config" / "py-x-bookmarks-to-raindrop-sync"
+    return Path.cwd() / ".x2raindrop"
 
 
 def get_default_config_path() -> Path:
     """Get the default configuration file path.
 
     Returns:
-        Path to the config file.
+        Path to the config file (config.toml in the current working directory).
     """
-    return get_default_config_dir() / "config.toml"
+    return Path.cwd() / "config.toml"
 
 
 def get_default_state_path() -> Path:
@@ -59,12 +59,18 @@ def get_default_token_path() -> Path:
 class XSettings(BaseSettings):
     """X (Twitter) API settings.
 
+    Supports two authentication methods:
+    1. OAuth 2.0 PKCE flow (interactive browser login)
+    2. Direct access token (for automation or pre-existing tokens)
+
     Attributes:
-        client_id: OAuth2 client ID from X Developer Portal.
+        client_id: OAuth2 client ID from X Developer Portal (required for PKCE flow).
         client_secret: Optional OAuth2 client secret (for confidential apps).
         redirect_uri: OAuth2 redirect URI for PKCE flow.
         token_path: Path to store the OAuth2 tokens.
         scopes: OAuth2 scopes to request.
+        access_token: Direct access token (alternative to PKCE flow).
+        bearer_token: App-only bearer token (limited functionality, read-only).
     """
 
     model_config = SettingsConfigDict(
@@ -73,7 +79,8 @@ class XSettings(BaseSettings):
         extra="ignore",
     )
 
-    client_id: str = Field(..., description="X OAuth2 Client ID")
+    # OAuth 2.0 PKCE settings (for interactive login)
+    client_id: str | None = Field(None, description="X OAuth2 Client ID")
     client_secret: str | None = Field(None, description="X OAuth2 Client Secret (optional)")
     redirect_uri: str = Field(
         "http://127.0.0.1:8765/callback",
@@ -87,6 +94,42 @@ class XSettings(BaseSettings):
         default=["bookmark.read", "bookmark.write", "tweet.read", "users.read", "offline.access"],
         description="OAuth2 scopes to request",
     )
+
+    # Direct token authentication (alternative to PKCE)
+    access_token: str | None = Field(
+        None,
+        description="Direct OAuth2 access token (skips browser login)",
+    )
+    bearer_token: str | None = Field(
+        None,
+        description="App-only bearer token (limited functionality)",
+    )
+
+    def has_direct_token(self) -> bool:
+        """Check if a direct token is configured.
+
+        Returns:
+            True if access_token or bearer_token is set.
+        """
+        return bool(self.access_token or self.bearer_token)
+
+    def get_direct_token(self) -> str | None:
+        """Get the direct token if configured.
+
+        Prefers access_token over bearer_token.
+
+        Returns:
+            The token string or None.
+        """
+        return self.access_token or self.bearer_token
+
+    def can_use_pkce_flow(self) -> bool:
+        """Check if PKCE flow can be used.
+
+        Returns:
+            True if client_id is configured.
+        """
+        return bool(self.client_id)
 
 
 class RaindropSettings(BaseSettings):
@@ -259,7 +302,12 @@ def create_default_config(path: Path | None = None) -> Path:
     default_config = {
         "log_level": "INFO",
         "x": {
-            "client_id": "YOUR_X_CLIENT_ID",
+            # Option 1: Direct access token (simplest, no browser login needed)
+            # Get this from X Developer Portal or existing OAuth flow
+            "access_token": "",
+            # Option 2: OAuth PKCE flow (interactive browser login)
+            # Set client_id to enable `x2raindrop x login`
+            "client_id": "",
             "client_secret": "",
             "redirect_uri": "http://127.0.0.1:8765/callback",
             "scopes": [

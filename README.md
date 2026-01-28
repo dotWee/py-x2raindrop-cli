@@ -27,7 +27,7 @@ A Python CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/yourusername/py-x-bookmarks-to-raindrop-sync.git
+git clone https://github.com/dotwee/py-x-bookmarks-to-raindrop-sync.git
 cd py-x-bookmarks-to-raindrop-sync
 
 # Install with Poetry
@@ -36,6 +36,24 @@ poetry install
 
 ### 2. Set Up X API Credentials
 
+You have two options for X authentication:
+
+#### Option A: Direct Access Token (Simplest)
+
+If you already have an access token (e.g., from another OAuth flow or the X Developer Portal):
+
+1. Set `X_ACCESS_TOKEN` in your config or environment
+2. No browser login required - just run sync directly
+
+```toml
+[x]
+access_token = "your_access_token_here"
+```
+
+#### Option B: OAuth 2.0 PKCE Flow (Interactive)
+
+For browser-based login:
+
 1. Go to the [X Developer Portal](https://developer.x.com/en/portal/dashboard)
 2. Create a new project and app (or use an existing one)
 3. Under "User authentication settings", configure:
@@ -43,6 +61,7 @@ poetry install
    - **Type of App**: Native App (for PKCE without client secret) or Confidential Client
    - **Callback URL**: `http://127.0.0.1:8765/callback`
 4. Note your **Client ID** (and **Client Secret** if using Confidential Client)
+5. Run `x2raindrop x login` to authenticate
 
 **Required OAuth 2.0 Scopes:**
 - `bookmark.read` - Read your bookmarks
@@ -62,17 +81,21 @@ poetry install
 Create a configuration file:
 
 ```bash
-# Create default config file
+# Create default config file in current directory
 poetry run x2raindrop config init
 
 # Edit the config file
-nano ~/.config/py-x-bookmarks-to-raindrop-sync/config.toml
+nano config.toml
 ```
 
 Or use environment variables:
 
 ```bash
-# X API credentials
+# X API credentials (choose one method)
+# Option A: Direct access token
+export X_ACCESS_TOKEN="your_access_token"
+
+# Option B: OAuth PKCE flow (then run `x2raindrop x login`)
 export X_CLIENT_ID="your_client_id"
 export X_CLIENT_SECRET="your_client_secret"  # Optional for public clients
 
@@ -81,7 +104,7 @@ export RAINDROP_TOKEN="your_raindrop_token"
 
 # Sync settings
 export SYNC_COLLECTION_ID="12345"  # Target collection ID
-export SYNC_TAGS="x-bookmark,auto-synced"
+export SYNC_TAGS='["x-bookmark", "auto-synced"]'  # JSON array format
 export SYNC_REMOVE_FROM_X="false"
 export SYNC_LINK_MODE="permalink"  # permalink, first_external_url, or both
 ```
@@ -146,7 +169,7 @@ poetry run x2raindrop x logout
 
 ### Config File Location
 
-Default: `~/.config/py-x-bookmarks-to-raindrop-sync/config.toml`
+Default: `config.toml` in the current working directory (project root).
 
 Override with `--config` flag on any command.
 
@@ -156,7 +179,11 @@ Override with `--config` flag on any command.
 log_level = "INFO"
 
 [x]
-client_id = "YOUR_X_CLIENT_ID"
+# Option A: Direct access token (simplest - no browser login needed)
+access_token = ""
+
+# Option B: OAuth PKCE flow (use `x2raindrop x login`)
+client_id = ""
 client_secret = ""  # Leave empty for public clients
 redirect_uri = "http://127.0.0.1:8765/callback"
 scopes = [
@@ -199,18 +226,36 @@ When `link_mode = "both"` and the tweet contains an external URL:
 
 ## Data Storage
 
-The tool stores data in `~/.config/py-x-bookmarks-to-raindrop-sync/`:
+The tool stores data in the current working directory:
 
 - `config.toml` - Configuration file
-- `x_token.json` - X OAuth tokens (keep secure!)
-- `state.json` - Sync state for idempotency
+- `.x2raindrop/x_token.json` - X OAuth tokens (keep secure!)
+- `.x2raindrop/state.json` - Sync state for idempotency
 
 ## Safety Notes
 
 1. **Dry Run First**: Always use `--dry-run` before syncing to preview changes
 2. **Remove from X**: The `--remove-from-x` flag permanently removes bookmarks from X. Use with caution and consider backing up first
 3. **Token Security**: The `x_token.json` file contains sensitive tokens. Ensure proper file permissions
-4. **Rate Limits**: X API has rate limits. The tool handles pagination but very large bookmark collections may require multiple runs
+
+## X API Rate Limits
+
+**IMPORTANT**: X API has strict rate limits, especially on the Free Tier.
+
+| Tier | Rate Limit | Notes |
+|------|------------|-------|
+| Free | 1 request / 15 min | Very limited - sync may take a long time |
+| Basic | Higher limits | Check X Developer Portal for current limits |
+
+**API Request Breakdown:**
+- Fetching bookmarks: 1 request per 100 bookmarks (paginated)
+- Deleting a bookmark: 1 request per bookmark
+
+**Recommendations for Free Tier:**
+1. **Don't use `--remove-from-x`** - each deletion is a separate request
+2. Be patient - syncing may take multiple runs
+3. The tool tracks synced bookmarks locally, so you can run it multiple times
+4. Consider upgrading to Basic tier if you have many bookmarks
 
 ## Development
 

@@ -76,8 +76,7 @@ dmypy.json
 
 # Local config and state (keep templates)
 config.toml
-x_token.json
-state.json
+.x2raindrop/
 
 # OS
 .DS_Store

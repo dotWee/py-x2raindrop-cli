@@ -137,6 +137,23 @@ class RaindropClient:
             self._api.close()
             self._api = None
 
+    def _get_parent_id(self, collection: Collection) -> int | None:
+        """Safely get the parent ID of a collection.
+
+        Args:
+            collection: Collection to get parent ID from.
+
+        Returns:
+            Parent ID or None if no parent or error accessing it.
+        """
+        if not collection.parent:
+            return None
+        try:
+            return collection.parent.id
+        except (TypeError, AttributeError):
+            # Handle case where parent exists but internal data is None
+            return None
+
     def list_collections(self) -> list[RaindropCollection]:
         """List all collections (root and children).
 
@@ -152,7 +169,7 @@ class RaindropClient:
                     id=c.id,
                     title=c.title,
                     count=c.count,
-                    parent_id=c.parent.id if c.parent else None,
+                    parent_id=self._get_parent_id(c),
                 )
             )
 
@@ -163,7 +180,7 @@ class RaindropClient:
                     id=c.id,
                     title=c.title,
                     count=c.count,
-                    parent_id=c.parent.id if c.parent else None,
+                    parent_id=self._get_parent_id(c),
                 )
             )
 

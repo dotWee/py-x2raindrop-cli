@@ -17,6 +17,7 @@ from rich.table import Table
 
 from py_x_bookmarks_to_raindrop_sync import __version__
 from py_x_bookmarks_to_raindrop_sync.config import (
+    Settings,
     create_default_config,
     get_default_config_path,
     load_settings,
@@ -25,7 +26,7 @@ from py_x_bookmarks_to_raindrop_sync.models import LinkMode, SyncResult
 from py_x_bookmarks_to_raindrop_sync.raindrop.client import RaindropClient
 from py_x_bookmarks_to_raindrop_sync.state import SyncState
 from py_x_bookmarks_to_raindrop_sync.sync.service import SyncService
-from py_x_bookmarks_to_raindrop_sync.x.auth_pkce import PKCEAuthFlow
+from py_x_bookmarks_to_raindrop_sync.x.auth_pkce import OAuth2Token, PKCEAuthFlow
 from py_x_bookmarks_to_raindrop_sync.x.client import XClient
 
 # Configure structlog for CLI
@@ -65,6 +66,38 @@ app.add_typer(config_app, name="config")
 
 # Rich console for output
 console = Console()
+
+
+def _get_x_token(settings: Settings) -> OAuth2Token | None:
+    """Get X authentication token from settings.
+
+    Checks for direct token first, then falls back to PKCE flow.
+
+    Args:
+        settings: Application settings.
+
+    Returns:
+        OAuth2Token if authenticated, None otherwise.
+    """
+    # Check for direct access token first
+    if settings.x.has_direct_token():
+        direct_token = settings.x.get_direct_token()
+        if direct_token:
+            logger.debug("Using direct access token")
+            return OAuth2Token.from_access_token(direct_token)
+
+    # Fall back to PKCE flow if client_id is configured
+    if settings.x.can_use_pkce_flow():
+        auth_flow = PKCEAuthFlow(
+            client_id=settings.x.client_id,  # type: ignore[arg-type]
+            client_secret=settings.x.client_secret,
+            redirect_uri=settings.x.redirect_uri,
+            scopes=settings.x.scopes,
+            token_path=settings.x.token_path,
+        )
+        return auth_flow.get_token()
+
+    return None
 
 
 def version_callback(value: bool) -> None:
@@ -172,27 +205,34 @@ def sync(
             )
             raise typer.Exit(1)
 
-        # Initialize X auth
-        auth_flow = PKCEAuthFlow(
-            client_id=settings.x.client_id,
-            client_secret=settings.x.client_secret,
-            redirect_uri=settings.x.redirect_uri,
-            scopes=settings.x.scopes,
-            token_path=settings.x.token_path,
-        )
-
-        # Check X authentication
-        token = auth_flow.get_token()
+        # Get X authentication token
+        token = _get_x_token(settings)
         if not token:
-            console.print(
-                "[yellow]Not authenticated with X.[/yellow] "
-                "Run [bold]x2raindrop x login[/bold] first.",
-            )
+            if settings.x.can_use_pkce_flow():
+                console.print(
+                    "[yellow]Not authenticated with X.[/yellow] "
+                    "Run [bold]x2raindrop x login[/bold] first.",
+                )
+            else:
+                console.print(
+                    "[red]Error:[/red] No X authentication configured.\n"
+                    "Either set X_ACCESS_TOKEN in config/env, or configure "
+                    "X_CLIENT_ID for OAuth login.",
+                )
             raise typer.Exit(1)
 
         # Show sync configuration
         if settings.sync.dry_run:
             console.print("[yellow]DRY RUN MODE - No changes will be made[/yellow]\n")
+
+        # Rate limit warning for remove_from_x
+        if settings.sync.remove_from_x:
+            console.print(
+                "[yellow bold]WARNING:[/yellow bold] --remove-from-x is enabled.\n"
+                "Each bookmark deletion requires a separate X API request.\n"
+                "X API Free Tier only allows 1 request per 15 minutes!\n"
+                "Consider using --no-remove-from-x to avoid rate limits.\n"
+            )
 
         table = Table(title="Sync Configuration", show_header=False)
         table.add_column("Setting", style="cyan")
@@ -233,7 +273,7 @@ def sync(
             result = service.sync(progress_callback=update_progress)
 
         # Show results
-        _display_sync_result(result)
+        _display_sync_result(result, x_client.request_count)
 
         # Cleanup
         x_client.close()
@@ -245,8 +285,13 @@ def sync(
         raise typer.Exit(1) from None
 
 
-def _display_sync_result(result: SyncResult) -> None:
-    """Display sync results in a nice table."""
+def _display_sync_result(result: SyncResult, x_api_requests: int = 0) -> None:
+    """Display sync results in a nice table.
+
+    Args:
+        result: Sync result with statistics.
+        x_api_requests: Number of X API requests made.
+    """
     table = Table(title="Sync Results")
     table.add_column("Metric", style="cyan")
     table.add_column("Count", style="green", justify="right")
@@ -256,8 +301,16 @@ def _display_sync_result(result: SyncResult) -> None:
     table.add_row("Already Synced", str(result.already_synced))
     table.add_row("Failed", str(result.failed))
     table.add_row("Deleted from X", str(result.deleted_from_x))
+    table.add_row("X API Requests", str(x_api_requests))
 
     console.print(table)
+
+    # Rate limit info
+    if x_api_requests > 0:
+        console.print(
+            f"\n[dim]X API requests made: {x_api_requests} "
+            "(Free Tier limit: 1 request per 15 min)[/dim]"
+        )
 
     if result.errors:
         console.print("\n[yellow]Errors:[/yellow]")
@@ -283,12 +336,32 @@ def x_login(
 
     Opens a browser for you to authorize the app. The tokens are
     stored locally for future use.
+
+    NOTE: If you have a direct access token configured (X_ACCESS_TOKEN),
+    you don't need to use this command.
     """
     try:
         settings = load_settings(config_path)
 
+        # Check if direct token is already configured
+        if settings.x.has_direct_token():
+            console.print(
+                "[yellow]Direct access token is already configured.[/yellow]\n"
+                "You don't need to use the browser login flow.\n"
+                "Run [bold]x2raindrop x status[/bold] to check authentication."
+            )
+            return
+
+        # Check if PKCE flow can be used
+        if not settings.x.can_use_pkce_flow():
+            console.print(
+                "[red]Error:[/red] No X_CLIENT_ID configured.\n"
+                "Either set X_CLIENT_ID for OAuth login, or use X_ACCESS_TOKEN directly."
+            )
+            raise typer.Exit(1)
+
         auth_flow = PKCEAuthFlow(
-            client_id=settings.x.client_id,
+            client_id=settings.x.client_id,  # type: ignore[arg-type]
             client_secret=settings.x.client_secret,
             redirect_uri=settings.x.redirect_uri,
             scopes=settings.x.scopes,
@@ -329,28 +402,51 @@ def x_status(
     try:
         settings = load_settings(config_path)
 
-        auth_flow = PKCEAuthFlow(
-            client_id=settings.x.client_id,
-            client_secret=settings.x.client_secret,
-            redirect_uri=settings.x.redirect_uri,
-            scopes=settings.x.scopes,
-            token_path=settings.x.token_path,
-        )
-
-        token = auth_flow.get_token()
-
-        if token:
-            console.print("[green]Authenticated with X[/green]")
+        # Check for direct token
+        if settings.x.has_direct_token():
+            console.print("[green]Authenticated with X (direct token)[/green]")
             table = Table(show_header=False)
             table.add_column("Field", style="cyan")
             table.add_column("Value", style="green")
-            table.add_row("Expires at", str(token.expires_at))
-            table.add_row("Scopes", token.scope)
-            table.add_row("Token type", token.token_type)
+            table.add_row("Auth method", "Direct access token")
+            table.add_row(
+                "Token type",
+                "access_token" if settings.x.access_token else "bearer_token",
+            )
+            table.add_row("Token", "***" + (settings.x.get_direct_token() or "")[-8:])
             console.print(table)
-        else:
-            console.print("[yellow]Not authenticated with X[/yellow]")
-            console.print("Run [bold]x2raindrop x login[/bold] to authenticate.")
+            return
+
+        # Check PKCE flow token
+        if settings.x.can_use_pkce_flow():
+            auth_flow = PKCEAuthFlow(
+                client_id=settings.x.client_id,  # type: ignore[arg-type]
+                client_secret=settings.x.client_secret,
+                redirect_uri=settings.x.redirect_uri,
+                scopes=settings.x.scopes,
+                token_path=settings.x.token_path,
+            )
+
+            token = auth_flow.get_token()
+
+            if token:
+                console.print("[green]Authenticated with X (OAuth PKCE)[/green]")
+                table = Table(show_header=False)
+                table.add_column("Field", style="cyan")
+                table.add_column("Value", style="green")
+                table.add_row("Auth method", "OAuth 2.0 PKCE")
+                table.add_row("Expires at", str(token.expires_at))
+                table.add_row("Scopes", token.scope or "(unknown)")
+                table.add_row("Token type", token.token_type)
+                console.print(table)
+                return
+
+        console.print("[yellow]Not authenticated with X[/yellow]")
+        console.print(
+            "Options:\n"
+            "  1. Set X_ACCESS_TOKEN in config for direct authentication\n"
+            "  2. Run [bold]x2raindrop x login[/bold] for browser-based OAuth"
+        )
 
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -370,20 +466,36 @@ def x_logout(
         ),
     ] = None,
 ) -> None:
-    """Clear stored X authentication tokens."""
+    """Clear stored X authentication tokens.
+
+    NOTE: This only clears tokens from the PKCE flow. If you're using
+    a direct access token (X_ACCESS_TOKEN), remove it from your config.
+    """
     try:
         settings = load_settings(config_path)
 
-        auth_flow = PKCEAuthFlow(
-            client_id=settings.x.client_id,
-            client_secret=settings.x.client_secret,
-            redirect_uri=settings.x.redirect_uri,
-            scopes=settings.x.scopes,
-            token_path=settings.x.token_path,
-        )
+        # Warn if using direct token
+        if settings.x.has_direct_token():
+            console.print(
+                "[yellow]Note:[/yellow] You have a direct access token configured.\n"
+                "This command only clears OAuth PKCE tokens.\n"
+                "To remove the direct token, edit your config file."
+            )
 
-        auth_flow.logout()
-        console.print("[green]Logged out from X[/green]")
+        # Clear PKCE tokens if configured
+        if settings.x.can_use_pkce_flow():
+            auth_flow = PKCEAuthFlow(
+                client_id=settings.x.client_id,  # type: ignore[arg-type]
+                client_secret=settings.x.client_secret,
+                redirect_uri=settings.x.redirect_uri,
+                scopes=settings.x.scopes,
+                token_path=settings.x.token_path,
+            )
+
+            auth_flow.logout()
+            console.print("[green]Logged out from X (cleared PKCE tokens)[/green]")
+        else:
+            console.print("[dim]No PKCE tokens to clear.[/dim]")
 
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")

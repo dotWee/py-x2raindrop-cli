@@ -2,6 +2,13 @@
 
 This module provides a thin wrapper around the XDK for fetching
 and managing bookmarks with proper pagination support.
+
+RATE LIMIT NOTES:
+- X API Free Tier: 1 request per 15 minutes per user
+- Basic Tier: Higher limits but still limited
+- Each operation (fetch bookmarks, delete bookmark) counts as a request
+- User ID lookup is cached to avoid extra requests
+- Bookmark deletion requires one API call per bookmark (no batch API)
 """
 
 from __future__ import annotations
@@ -28,6 +35,9 @@ X_API_BASE = "https://api.x.com/2"
 
 # URL pattern for extracting external URLs (non-t.co links)
 URL_PATTERN = re.compile(r"https?://(?!t\.co)[^\s]+")
+
+# Maximum results per page (X API limit)
+MAX_RESULTS_PER_PAGE = 100
 
 
 class XClientProtocol(Protocol):
@@ -69,6 +79,11 @@ class XClient:
 
     This client uses direct HTTP requests to the X API v2 endpoints
     for bookmark operations, with OAuth2 bearer token authentication.
+
+    RATE LIMIT AWARENESS:
+    - Tracks API request count for monitoring
+    - Caches user ID to avoid extra requests
+    - Fetches maximum results per page to minimize pagination requests
     """
 
     def __init__(self, token: OAuth2Token) -> None:
@@ -79,6 +94,7 @@ class XClient:
         """
         self.token = token
         self._user_id: str | None = None
+        self._request_count: int = 0
         self._http_client = httpx.Client(
             base_url=X_API_BASE,
             headers={
@@ -87,6 +103,11 @@ class XClient:
             },
             timeout=30.0,
         )
+
+    @property
+    def request_count(self) -> int:
+        """Get the number of API requests made in this session."""
+        return self._request_count
 
     def __enter__(self) -> XClient:
         """Context manager entry."""
@@ -100,8 +121,42 @@ class XClient:
         """Close the HTTP client."""
         self._http_client.close()
 
+    def _make_request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Make an HTTP request and track it.
+
+        Args:
+            method: HTTP method (GET, POST, DELETE, etc.)
+            url: URL path (relative to base URL)
+            **kwargs: Additional arguments for httpx
+
+        Returns:
+            HTTP response
+
+        Raises:
+            httpx.HTTPStatusError: If the request fails.
+        """
+        self._request_count += 1
+        logger.debug(
+            "Making X API request",
+            method=method,
+            url=url,
+            request_number=self._request_count,
+        )
+
+        response = self._http_client.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response
+
     def get_authenticated_user_id(self) -> str:
         """Get the authenticated user's ID.
+
+        NOTE: This makes an API request if not cached. Consider if you
+        can get the user ID from another response (e.g., token metadata).
 
         Returns:
             User ID string.
@@ -112,15 +167,30 @@ class XClient:
         if self._user_id is not None:
             return self._user_id
 
-        response = self._http_client.get("/users/me")
-        response.raise_for_status()
+        response = self._make_request("GET", "/users/me")
         data = response.json()
         self._user_id = data["data"]["id"]
         logger.debug("Got user ID", user_id=self._user_id)
         return self._user_id
 
+    def set_user_id(self, user_id: str) -> None:
+        """Set the user ID without making an API request.
+
+        Use this if you already know the user ID (e.g., from token metadata)
+        to save an API request.
+
+        Args:
+            user_id: The authenticated user's ID.
+        """
+        self._user_id = user_id
+        logger.debug("User ID set manually", user_id=user_id)
+
     def get_bookmarks(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
         """Fetch bookmarks from X with pagination.
+
+        NOTE: Each page of results requires one API request. With rate limits,
+        pagination may be slow. The client fetches the maximum allowed per page
+        (100) to minimize requests.
 
         Args:
             max_results: Maximum total results to fetch. None for all.
@@ -134,10 +204,12 @@ class XClient:
         user_id = self.get_authenticated_user_id()
         total_fetched = 0
         pagination_token: str | None = None
+        page_count = 0
 
-        # Request expansions and fields for full data
-        params = {
-            "max_results": min(100, max_results) if max_results else 100,
+        # Request maximum results per page to minimize API calls
+        # Also request all needed expansions in a single call
+        params: dict[str, Any] = {
+            "max_results": MAX_RESULTS_PER_PAGE,  # Always fetch max to minimize requests
             "expansions": "author_id",
             "tweet.fields": "created_at,text,entities,author_id",
             "user.fields": "username,name",
@@ -147,10 +219,14 @@ class XClient:
             if pagination_token:
                 params["pagination_token"] = pagination_token
 
-            logger.debug("Fetching bookmarks page", pagination_token=pagination_token)
-            response = self._http_client.get(f"/users/{user_id}/bookmarks", params=params)
-            response.raise_for_status()
+            page_count += 1
+            logger.debug(
+                "Fetching bookmarks page",
+                page=page_count,
+                pagination_token=pagination_token,
+            )
 
+            response = self._make_request("GET", f"/users/{user_id}/bookmarks", params=params)
             data = response.json()
 
             # Build user lookup for author info
@@ -165,6 +241,11 @@ class XClient:
             # Process tweets
             tweets = data.get("data", [])
             if not tweets:
+                logger.info(
+                    "No bookmarks found or end of results",
+                    pages_fetched=page_count,
+                    total_fetched=total_fetched,
+                )
                 break
 
             for tweet in tweets:
@@ -173,6 +254,11 @@ class XClient:
                 total_fetched += 1
 
                 if max_results and total_fetched >= max_results:
+                    logger.info(
+                        "Reached max results limit",
+                        max_results=max_results,
+                        pages_fetched=page_count,
+                    )
                     return
 
             # Check for next page
@@ -181,7 +267,12 @@ class XClient:
             if not pagination_token:
                 break
 
-        logger.info("Fetched all bookmarks", total=total_fetched)
+        logger.info(
+            "Fetched all bookmarks",
+            total=total_fetched,
+            pages_fetched=page_count,
+            api_requests=self._request_count,
+        )
 
     def _parse_tweet(
         self, tweet: dict[str, Any], users_lookup: dict[str, dict[str, str]]
@@ -272,6 +363,10 @@ class XClient:
     def delete_bookmark(self, tweet_id: str) -> bool:
         """Remove a tweet from bookmarks.
 
+        WARNING: Each delete operation requires one API request.
+        With X API Free Tier (1 request/15 min), this is very expensive.
+        Consider using --no-remove-from-x to avoid hitting rate limits.
+
         Args:
             tweet_id: ID of the tweet to unbookmark.
 
@@ -283,9 +378,13 @@ class XClient:
         """
         user_id = self.get_authenticated_user_id()
 
-        response = self._http_client.delete(f"/users/{user_id}/bookmarks/{tweet_id}")
-        response.raise_for_status()
+        logger.warning(
+            "Deleting bookmark (uses 1 API request)",
+            tweet_id=tweet_id,
+            total_requests=self._request_count + 1,
+        )
 
+        response = self._make_request("DELETE", f"/users/{user_id}/bookmarks/{tweet_id}")
         data = response.json()
         success = data.get("data", {}).get("bookmarked") is False
 
@@ -293,7 +392,9 @@ class XClient:
             logger.debug("Deleted bookmark", tweet_id=tweet_id)
         else:
             logger.warning(
-                "Delete bookmark returned unexpected response", tweet_id=tweet_id, data=data
+                "Delete bookmark returned unexpected response",
+                tweet_id=tweet_id,
+                data=data,
             )
 
         return success
