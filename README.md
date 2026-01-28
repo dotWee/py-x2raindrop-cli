@@ -3,6 +3,7 @@
 A Python CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
 
 [![PyPI version](https://badge.fury.io/py/x2raindrop-cli.svg)](https://badge.fury.io/py/x2raindrop-cli)
+[![Docker Image](https://ghcr-badge.egpl.dev/dotwee/x2raindrop-cli/latest_tag?trim=major&label=docker)](https://ghcr.io/dotwee/x2raindrop-cli)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-WTFPL-green.svg)](LICENSE)
 
@@ -43,6 +44,29 @@ cd x2raindrop-cli
 # Install with Poetry
 poetry install
 ```
+
+### Using Docker
+
+Pull the image from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/dotwee/x2raindrop-cli:latest
+```
+
+Run commands by mounting your local directory (for config and state persistence):
+
+```bash
+# Show help
+docker run --rm ghcr.io/dotwee/x2raindrop-cli --help
+
+# Initialize config in current directory
+docker run --rm -v "$PWD":/data ghcr.io/dotwee/x2raindrop-cli config init
+
+# Sync bookmarks
+docker run --rm -v "$PWD":/data ghcr.io/dotwee/x2raindrop-cli sync --collection 12345
+```
+
+See the [Docker Usage](#docker-usage) section for more details.
 
 ### 2. Set Up X API Credentials
 
@@ -273,6 +297,80 @@ The tool automatically handles rate limit errors (429 Too Many Requests):
 2. Be patient - the tool will automatically wait when rate limited
 3. The tool tracks synced bookmarks locally, so interrupted syncs can resume
 4. Consider upgrading to Basic tier if you have many bookmarks
+
+## Docker Usage
+
+The Docker image provides a convenient way to run x2raindrop-cli without installing Python dependencies locally.
+
+### Pulling the Image
+
+```bash
+# Latest version
+docker pull ghcr.io/dotwee/x2raindrop-cli:latest
+
+# Specific version
+docker pull ghcr.io/dotwee/x2raindrop-cli:1.0.0
+```
+
+### Running Commands
+
+The container's working directory is `/data`. Mount your local directory there to persist configuration and state:
+
+```bash
+# Create an alias for convenience
+alias x2raindrop='docker run --rm -v "$PWD":/data ghcr.io/dotwee/x2raindrop-cli'
+
+# Now use it like the native CLI
+x2raindrop --version
+x2raindrop config init
+x2raindrop raindrop collections
+x2raindrop sync --collection 12345 --dry-run
+```
+
+### Using Environment Variables
+
+Pass credentials via environment variables instead of a config file:
+
+```bash
+docker run --rm \
+  -e X_ACCESS_TOKEN="your_token" \
+  -e RAINDROP_TOKEN="your_raindrop_token" \
+  -e SYNC_COLLECTION_ID="12345" \
+  -v "$PWD":/data \
+  ghcr.io/dotwee/x2raindrop-cli sync
+```
+
+### OAuth Authentication in Docker
+
+The interactive OAuth 2.0 PKCE flow (`x2raindrop x login`) requires a browser, which doesn't work well inside a container. You have two options:
+
+**Option 1: Use a Direct Access Token (Recommended for Docker)**
+
+Set `X_ACCESS_TOKEN` in your config or as an environment variable. No browser login required.
+
+**Option 2: Authenticate on Host, Then Use in Docker**
+
+1. Install the CLI locally and run `x2raindrop x login` on your host machine
+2. This creates `.x2raindrop/x_token.json` in your current directory
+3. Mount that directory when running Docker:
+
+```bash
+docker run --rm -v "$PWD":/data ghcr.io/dotwee/x2raindrop-cli sync --collection 12345
+```
+
+The container will use the token file from your mounted directory.
+
+### Data Persistence
+
+The container stores data in `/data` (the working directory):
+
+| File | Purpose |
+|------|---------|
+| `config.toml` | Configuration file |
+| `.x2raindrop/x_token.json` | X OAuth tokens |
+| `.x2raindrop/state.json` | Sync state for idempotency |
+
+Always mount a volume to `/data` to persist this data between runs.
 
 ## Development
 

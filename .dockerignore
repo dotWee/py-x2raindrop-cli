@@ -1,0 +1,61 @@
+# Git
+.git/
+.gitignore
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Test and coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.tox/
+.nox/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local config and state (sensitive data)
+config.toml
+.x2raindrop/
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation build
+docs/_build/
+
+# Poetry lock (we want fresh installs in Docker)
+poetry.lock
+
+# GitHub workflows (not needed in image)
+.github/
+
+# Tests (not needed in production image)
+tests/
