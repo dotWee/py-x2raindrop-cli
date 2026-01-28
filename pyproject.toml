@@ -1,12 +1,25 @@
 [project]
-name = "py-x-bookmarks-to-raindrop-sync"
+name = "x2raindrop-cli"
 version = "0.1.0"
-description = "Sync X (Twitter) Bookmarks to Raindrop.io"
+description = "CLI tool to sync X (Twitter) Bookmarks to Raindrop.io"
 authors = [
     {name = "Lukas Wolfsteiner",email = "lukas@wolfsteiner.media"}
 ]
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["twitter", "x", "raindrop", "bookmarks", "sync", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet",
+    "Topic :: Utilities",
+]
 dependencies = [
     "xdk>=0.5.0",
     "python-raindropio>=0.0.4",
@@ -21,6 +34,11 @@ dependencies = [
 ]
 license = {file = "LICENSE"}
 
+[project.urls]
+Homepage = "https://github.com/dotWee/x2raindrop-cli"
+Repository = "https://github.com/dotWee/x2raindrop-cli"
+Issues = "https://github.com/dotWee/x2raindrop-cli/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
@@ -33,10 +51,10 @@ dev = [
 ]
 
 [project.scripts]
-x2raindrop = "py_x_bookmarks_to_raindrop_sync.cli:app"
+x2raindrop = "x2raindrop_cli.cli:app"
 
 [tool.poetry]
-packages = [{include = "py_x_bookmarks_to_raindrop_sync", from = "src"}]
+packages = [{include = "x2raindrop_cli", from = "src"}]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0.0"
@@ -74,14 +92,14 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["py_x_bookmarks_to_raindrop_sync"]
+known-first-party = ["x2raindrop_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = [
-    "--cov=py_x_bookmarks_to_raindrop_sync",
+    "--cov=x2raindrop_cli",
     "--cov-report=term-missing",
     "--cov-report=html",
     "--cov-fail-under=80",
@@ -89,7 +107,7 @@ addopts = [
 ]
 
 [tool.coverage.run]
-source = ["src/py_x_bookmarks_to_raindrop_sync"]
+source = ["src/x2raindrop_cli"]
 branch = true
 omit = ["*/tests/*", "*/__init__.py"]
 

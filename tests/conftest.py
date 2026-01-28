@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from py_x_bookmarks_to_raindrop_sync.config import SyncSettings
-from py_x_bookmarks_to_raindrop_sync.models import BookmarkItem, BothBehavior, LinkMode
-from py_x_bookmarks_to_raindrop_sync.raindrop.client import MockRaindropClient, RaindropCollection
-from py_x_bookmarks_to_raindrop_sync.state import InMemoryState
-from py_x_bookmarks_to_raindrop_sync.x.auth_pkce import OAuth2Token
-from py_x_bookmarks_to_raindrop_sync.x.client import MockXClient
+from x2raindrop_cli.config import SyncSettings
+from x2raindrop_cli.models import BookmarkItem, BothBehavior, LinkMode
+from x2raindrop_cli.raindrop.client import MockRaindropClient, RaindropCollection
+from x2raindrop_cli.state import InMemoryState
+from x2raindrop_cli.x.auth_pkce import OAuth2Token
+from x2raindrop_cli.x.client import MockXClient
 
 if TYPE_CHECKING:
     pass

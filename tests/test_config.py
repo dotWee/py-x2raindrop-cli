@@ -8,14 +8,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from py_x_bookmarks_to_raindrop_sync.config import (
+from x2raindrop_cli.config import (
     SyncSettings,
     XSettings,
     create_default_config,
     get_default_config_dir,
     get_default_config_path,
 )
-from py_x_bookmarks_to_raindrop_sync.models import BothBehavior, LinkMode
+from x2raindrop_cli.models import BothBehavior, LinkMode
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch

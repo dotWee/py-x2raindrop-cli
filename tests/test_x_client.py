@@ -8,8 +8,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from py_x_bookmarks_to_raindrop_sync.models import BookmarkItem
-from py_x_bookmarks_to_raindrop_sync.x.client import MockXClient
+from x2raindrop_cli.models import BookmarkItem
+from x2raindrop_cli.x.client import MockXClient
 
 if TYPE_CHECKING:
     pass

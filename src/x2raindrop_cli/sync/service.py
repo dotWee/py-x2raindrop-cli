@@ -12,17 +12,17 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from py_x_bookmarks_to_raindrop_sync.config import SyncSettings
-from py_x_bookmarks_to_raindrop_sync.models import (
+from x2raindrop_cli.config import SyncSettings
+from x2raindrop_cli.models import (
     BookmarkItem,
     BothBehavior,
     LinkMode,
     RaindropCreateRequest,
     SyncResult,
 )
-from py_x_bookmarks_to_raindrop_sync.raindrop.client import RaindropClientProtocol
-from py_x_bookmarks_to_raindrop_sync.state import SyncState
-from py_x_bookmarks_to_raindrop_sync.x.client import XClientProtocol
+from x2raindrop_cli.raindrop.client import RaindropClientProtocol
+from x2raindrop_cli.state import SyncState
+from x2raindrop_cli.x.client import XClientProtocol
 
 if TYPE_CHECKING:
     pass

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from py_x_bookmarks_to_raindrop_sync.models import (
+from x2raindrop_cli.models import (
     BookmarkItem,
     BothBehavior,
     LinkMode,

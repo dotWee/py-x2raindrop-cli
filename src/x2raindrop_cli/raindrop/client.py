@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import structlog
 from raindropio import API, Collection, CollectionRef, Raindrop
 
-from py_x_bookmarks_to_raindrop_sync.models import RaindropCreateRequest
+from x2raindrop_cli.models import RaindropCreateRequest
 
 if TYPE_CHECKING:
     pass

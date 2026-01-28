@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from py_x_bookmarks_to_raindrop_sync.state import InMemoryState, SyncState
+from x2raindrop_cli.state import InMemoryState, SyncState
 
 if TYPE_CHECKING:
     pass

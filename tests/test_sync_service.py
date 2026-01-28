@@ -10,16 +10,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from py_x_bookmarks_to_raindrop_sync.config import SyncSettings
-from py_x_bookmarks_to_raindrop_sync.models import BookmarkItem, BothBehavior, LinkMode
-from py_x_bookmarks_to_raindrop_sync.raindrop.client import MockRaindropClient
-from py_x_bookmarks_to_raindrop_sync.state import InMemoryState
-from py_x_bookmarks_to_raindrop_sync.sync.service import (
+from x2raindrop_cli.config import SyncSettings
+from x2raindrop_cli.models import BookmarkItem, BothBehavior, LinkMode
+from x2raindrop_cli.raindrop.client import MockRaindropClient
+from x2raindrop_cli.state import InMemoryState
+from x2raindrop_cli.sync.service import (
     SyncService,
     create_raindrop_requests,
     resolve_links,
 )
-from py_x_bookmarks_to_raindrop_sync.x.client import MockXClient
+from x2raindrop_cli.x.client import MockXClient
 
 if TYPE_CHECKING:
     pass

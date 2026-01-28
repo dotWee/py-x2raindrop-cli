@@ -14,7 +14,7 @@ import tomli_w
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from py_x_bookmarks_to_raindrop_sync.models import BothBehavior, LinkMode
+from x2raindrop_cli.models import BothBehavior, LinkMode
 
 if TYPE_CHECKING:
     pass

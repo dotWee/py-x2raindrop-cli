@@ -15,19 +15,19 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 from rich.table import Table
 
-from py_x_bookmarks_to_raindrop_sync import __version__
-from py_x_bookmarks_to_raindrop_sync.config import (
+from x2raindrop_cli import __version__
+from x2raindrop_cli.config import (
     Settings,
     create_default_config,
     get_default_config_path,
     load_settings,
 )
-from py_x_bookmarks_to_raindrop_sync.models import LinkMode, SyncResult
-from py_x_bookmarks_to_raindrop_sync.raindrop.client import RaindropClient
-from py_x_bookmarks_to_raindrop_sync.state import SyncState
-from py_x_bookmarks_to_raindrop_sync.sync.service import SyncService
-from py_x_bookmarks_to_raindrop_sync.x.auth_pkce import OAuth2Token, PKCEAuthFlow
-from py_x_bookmarks_to_raindrop_sync.x.client import XClient
+from x2raindrop_cli.models import LinkMode, SyncResult
+from x2raindrop_cli.raindrop.client import RaindropClient
+from x2raindrop_cli.state import SyncState
+from x2raindrop_cli.sync.service import SyncService
+from x2raindrop_cli.x.auth_pkce import OAuth2Token, PKCEAuthFlow
+from x2raindrop_cli.x.client import XClient
 
 # Configure structlog for CLI
 structlog.configure(

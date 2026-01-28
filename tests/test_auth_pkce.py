@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from py_x_bookmarks_to_raindrop_sync.x.auth_pkce import (
+from x2raindrop_cli.x.auth_pkce import (
     OAuth2Token,
     PKCECodes,
     build_authorization_url,

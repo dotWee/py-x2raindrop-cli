@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from py_x_bookmarks_to_raindrop_sync.models import SyncedBookmark
+from x2raindrop_cli.models import SyncedBookmark
 
 if TYPE_CHECKING:
     pass

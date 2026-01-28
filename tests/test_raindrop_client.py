@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from py_x_bookmarks_to_raindrop_sync.models import RaindropCreateRequest
-from py_x_bookmarks_to_raindrop_sync.raindrop.client import (
+from x2raindrop_cli.models import RaindropCreateRequest
+from x2raindrop_cli.raindrop.client import (
     MockRaindropClient,
     RaindropCollection,
 )

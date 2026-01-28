@@ -1,6 +1,10 @@
-# X Bookmarks to Raindrop.io Sync
+# x2raindrop-cli
 
 A Python CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
+
+[![PyPI version](https://badge.fury.io/py/x2raindrop-cli.svg)](https://badge.fury.io/py/x2raindrop-cli)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-WTFPL-green.svg)](LICENSE)
 
 ## Features
 
@@ -24,11 +28,17 @@ A Python CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
 
 ## Installation
 
-### 1. Clone and Install
+### From PyPI (Recommended)
 
 ```bash
-git clone https://github.com/dotwee/py-x-bookmarks-to-raindrop-sync.git
-cd py-x-bookmarks-to-raindrop-sync
+pip install x2raindrop-cli
+```
+
+### From Source
+
+```bash
+git clone https://github.com/dotWee/x2raindrop-cli.git
+cd x2raindrop-cli
 
 # Install with Poetry
 poetry install
@@ -281,7 +291,7 @@ poetry run pytest
 ### Run Tests with Coverage
 
 ```bash
-poetry run pytest --cov=py_x_bookmarks_to_raindrop_sync --cov-report=html
+poetry run pytest --cov=x2raindrop_cli --cov-report=html
 ```
 
 ### Linting

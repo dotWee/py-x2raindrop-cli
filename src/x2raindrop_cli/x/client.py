@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 import httpx
 import structlog
 
-from py_x_bookmarks_to_raindrop_sync.models import BookmarkItem
-from py_x_bookmarks_to_raindrop_sync.x.auth_pkce import OAuth2Token
+from x2raindrop_cli.models import BookmarkItem
+from x2raindrop_cli.x.auth_pkce import OAuth2Token
 
 if TYPE_CHECKING:
     pass
