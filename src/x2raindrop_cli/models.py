@@ -7,16 +7,12 @@ items to be created in Raindrop.io.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
-from typing import TYPE_CHECKING
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    pass
 
-
-class LinkMode(str, Enum):
+class LinkMode(StrEnum):
     """How to determine the link for a Raindrop item.
 
     Attributes:
@@ -30,7 +26,7 @@ class LinkMode(str, Enum):
     BOTH = "both"
 
 
-class BothBehavior(str, Enum):
+class BothBehavior(StrEnum):
     """When LinkMode is BOTH, how to handle multiple links.
 
     Attributes:
