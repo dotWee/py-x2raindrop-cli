@@ -58,7 +58,7 @@ packages = [{include = "x2raindrop_cli", from = "src"}]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=9.0.3"
-pytest-cov = ">=5.0.0"
+pytest-cov = ">=7.1.0"
 pytest-mock = ">=3.14.0"
 pytest-asyncio = ">=0.23.0"
 ruff = ">=0.15.10"
