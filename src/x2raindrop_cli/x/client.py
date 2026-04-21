@@ -222,7 +222,7 @@ class XClient:
             if user_id is not None:
                 return str(user_id)
         if hasattr(data, "id"):
-            return str(getattr(data, "id"))
+            return str(data.id)
         raise ValueError("X get_me response does not contain a user ID")
 
     def _parse_tweet(

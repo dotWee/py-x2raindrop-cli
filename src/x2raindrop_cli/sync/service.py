@@ -264,9 +264,7 @@ class SyncService:
         try:
             created_raindrops = self.raindrop_client.create_raindrops(all_requests)
             if len(created_raindrops) != len(all_requests):
-                raise ValueError(
-                    "Batch create returned a different number of items than requested"
-                )
+                raise ValueError("Batch create returned a different number of items than requested")
             self._finalize_batched_sync(
                 pending_bookmark_requests=pending_bookmark_requests,
                 created_links=[raindrop.link for raindrop in created_raindrops],

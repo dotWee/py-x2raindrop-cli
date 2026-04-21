@@ -7,7 +7,7 @@ for creating bookmarks and listing collections.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
 from raindropio import API, Collection, CollectionRef, Raindrop
@@ -90,9 +90,7 @@ class RaindropClientProtocol(Protocol):
         """
         ...
 
-    def create_raindrops(
-        self, requests: list[RaindropCreateRequest]
-    ) -> list[CreatedRaindrop]:
+    def create_raindrops(self, requests: list[RaindropCreateRequest]) -> list[CreatedRaindrop]:
         """Create multiple Raindrop bookmarks in batches.
 
         Args:
@@ -313,9 +311,7 @@ class RaindropClient:
 
         return payload
 
-    def create_raindrops(
-        self, requests: list[RaindropCreateRequest]
-    ) -> list[CreatedRaindrop]:
+    def create_raindrops(self, requests: list[RaindropCreateRequest]) -> list[CreatedRaindrop]:
         """Create multiple Raindrop bookmarks using the bulk endpoint.
 
         Raindrop currently accepts up to 100 items per request, so larger
@@ -351,17 +347,20 @@ class RaindropClient:
             for request, item in zip(batch_requests, items, strict=True):
                 if not isinstance(item, dict):
                     raise ValueError("Unexpected bulk create response: item is not an object")
+                item_data = cast(dict[str, Any], item)
 
-                item_id = item.get("_id", item.get("id"))
+                item_id = item_data.get("_id")
+                if item_id is None:
+                    item_id = item_data.get("id")
                 if item_id is None:
                     raise ValueError("Unexpected bulk create response: missing item id")
 
-                item_title = item.get("title")
-                item_link = item.get("link", request.link)
+                item_title = item_data.get("title")
+                item_link = item_data.get("link")
                 created_raindrops.append(
                     CreatedRaindrop(
                         id=int(item_id),
-                        link=str(item_link),
+                        link=str(item_link) if item_link is not None else request.link,
                         title=str(item_title) if item_title is not None else (request.title or ""),
                         collection_id=request.collection_id,
                     )
@@ -442,9 +441,7 @@ class MockRaindropClient:
             collection_id=request.collection_id,
         )
 
-    def create_raindrops(
-        self, requests: list[RaindropCreateRequest]
-    ) -> list[CreatedRaindrop]:
+    def create_raindrops(self, requests: list[RaindropCreateRequest]) -> list[CreatedRaindrop]:
         """Track bulk-created raindrops in order."""
         self.batch_create_calls.append(list(requests))
         return [self.create_raindrop(request) for request in requests]
