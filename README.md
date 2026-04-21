@@ -309,7 +309,7 @@ The Docker image provides a convenient way to run x2raindrop-cli without install
 docker pull ghcr.io/dotwee/x2raindrop-cli:latest
 
 # Specific version
-docker pull ghcr.io/dotwee/x2raindrop-cli:1.0.0
+docker pull ghcr.io/dotwee/x2raindrop-cli:1.0.2
 ```
 
 ### Running Commands
