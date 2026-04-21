@@ -285,16 +285,13 @@ The tool stores data in the current working directory:
 - Fetching bookmarks: 1 request per 100 bookmarks (paginated)
 - Deleting a bookmark: 1 request per bookmark
 
-**Automatic Rate Limit Handling:**
-The tool automatically handles rate limit errors (429 Too Many Requests):
-- Detects rate limit responses from the X API
-- Parses `x-rate-limit-reset` or `Retry-After` headers to determine wait time
-- Automatically waits and retries (up to 5 times)
-- Logs wait time and progress so you can monitor
+**Rate Limit Behavior:**
+The CLI now uses the official Python XDK for X API calls. If X returns a 429
+rate-limit response, the command exits with the API error from the SDK.
 
 **Recommendations for Free Tier:**
 1. **Don't use `--remove-from-x`** - each deletion is a separate request
-2. Be patient - the tool will automatically wait when rate limited
+2. Wait for the current rate-limit window to reset, then rerun the command
 3. The tool tracks synced bookmarks locally, so interrupted syncs can resume
 4. Consider upgrading to Basic tier if you have many bookmarks
 
