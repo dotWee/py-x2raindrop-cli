@@ -1,7 +1,7 @@
 version: 2
 updates:
-  # Python dependencies (Poetry)
-  - package-ecosystem: "zv"
+  # Python dependencies (uv)
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"

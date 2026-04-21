@@ -27,7 +27,7 @@ jobs:
         run: |
           # Get the previous tag
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          
+
           if [ -z "$PREVIOUS_TAG" ]; then
             echo "First release - no previous tag found"
             echo "NOTES<<EOF" >> $GITHUB_OUTPUT
@@ -44,6 +44,15 @@ jobs:
             echo "" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
+
+      - name: Install GitHub CLI (if missing)
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            echo "gh already installed"
+            exit 0
+          fi
+          apt-get update
+          apt-get install -y gh
 
       - name: Create GitHub Release
         id: create_release
@@ -67,12 +76,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version-file: "pyproject.toml"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@v7
 
       - name: Build package
         run: uv build
@@ -88,10 +95,6 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
 
-    environment:
-      name: pypi
-      url: https://pypi.org/p/x2raindrop-cli
-
     steps:
       - name: Download all the dists
         uses: actions/download-artifact@v8
@@ -102,12 +105,43 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  publish-to-github-packages:
+    name: Publish to GitHub Packages (Python)
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v8
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to GitHub Packages
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://pypi.pkg.github.com/${{ github.repository_owner }}/
+          user: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          packages-dir: dist/
+          attestations: false
+          skip-existing: true
+
   upload-to-release:
     name: Upload to GitHub Release
     needs: [build]
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install GitHub CLI (if missing)
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            echo "gh already installed"
+            exit 0
+          fi
+          apt-get update
+          apt-get install -y gh
+
       - name: Download all the dists
         uses: actions/download-artifact@v8
         with:
@@ -127,7 +161,7 @@ jobs:
 
     env:
       REGISTRY: ghcr.io
-      IMAGE_NAME: dotwee/x2raindrop
+      IMAGE_NAME: dotwee/x2raindrop-cli
 
     steps:
       - uses: actions/checkout@v6
@@ -176,10 +210,7 @@ jobs:
         run: |
           echo "Testing x2raindrop --version..."
           docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test --version
-          
-          echo "Testing x2raindrop config path..."
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test config path
-          
+
           echo "Testing x2raindrop --help..."
           docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test --help
 

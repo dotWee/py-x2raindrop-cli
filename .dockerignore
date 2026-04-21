@@ -51,9 +51,6 @@ Thumbs.db
 # Documentation build
 docs/_build/
 
-# uv lock (we want fresh installs in Docker)
-uv.lock
-
 # GitHub workflows (not needed in image)
 .github/
 
