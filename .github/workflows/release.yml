@@ -94,6 +94,8 @@ jobs:
     name: Publish to PyPI
     needs: [build]
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
 
     steps:
       - name: Download all the dists
