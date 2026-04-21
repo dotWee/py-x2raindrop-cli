@@ -178,7 +178,9 @@ class SyncService:
 
         logger.info("Found bookmarks", count=result.total_bookmarks)
 
-        # Process each bookmark
+        pending_bookmark_requests: list[tuple[int, BookmarkItem, list[RaindropCreateRequest]]] = []
+
+        # Build request payloads for each bookmark
         for idx, bookmark in enumerate(bookmarks):
             log = logger.bind(
                 tweet_id=bookmark.tweet_id,
@@ -221,55 +223,13 @@ class SyncService:
                     )
                 continue
 
-            # Create Raindrop(s)
-            created_links: list[str] = []
-            sync_failed = False
+            pending_bookmark_requests.append((idx, bookmark, requests))
 
-            for request in requests:
-                try:
-                    created = self.raindrop_client.create_raindrop(request)
-                    created_links.append(created.link)
-                    log.info("Created raindrop", link=created.link, raindrop_id=created.id)
-                except Exception as e:
-                    log.error("Failed to create raindrop", link=request.link, error=str(e))
-                    result.add_error(f"[{bookmark.tweet_id}] Failed to create {request.link}: {e}")
-                    sync_failed = True
-                    break
-
-            if sync_failed:
-                result.failed += 1
-                continue
-
-            # Mark as synced
-            deleted_from_x = False
-
-            # Delete from X if configured
-            if self.settings.remove_from_x:
-                try:
-                    self.x_client.delete_bookmark(bookmark.tweet_id)
-                    deleted_from_x = True
-                    result.deleted_from_x += 1
-                    log.info("Deleted from X bookmarks")
-                except Exception as e:
-                    log.warning("Failed to delete from X", error=str(e))
-                    # Don't fail the sync, just note the issue
-                    result.add_error(f"[{bookmark.tweet_id}] Failed to delete from X: {e}")
-
-            # Update state
-            self.state.mark_synced(
-                bookmark.tweet_id,
-                created_links,
-                deleted_from_x,
-            )
-
-            result.newly_synced += 1
-
-            if progress_callback:
-                progress_callback(
-                    idx + 1,
-                    result.total_bookmarks,
-                    f"Synced: {bookmark.tweet_id}",
-                )
+        self._sync_pending_bookmarks(
+            pending_bookmark_requests,
+            result,
+            progress_callback,
+        )
 
         # Save state
         self.state.save()
@@ -284,3 +244,137 @@ class SyncService:
         )
 
         return result
+
+    def _sync_pending_bookmarks(
+        self,
+        pending_bookmark_requests: list[tuple[int, BookmarkItem, list[RaindropCreateRequest]]],
+        result: SyncResult,
+        progress_callback: ProgressCallback | None,
+    ) -> None:
+        """Create pending Raindrop requests in batch, with fallback mode."""
+        if not pending_bookmark_requests:
+            return
+
+        all_requests: list[RaindropCreateRequest] = [
+            request
+            for _, _, bookmark_requests in pending_bookmark_requests
+            for request in bookmark_requests
+        ]
+
+        try:
+            created_raindrops = self.raindrop_client.create_raindrops(all_requests)
+            if len(created_raindrops) != len(all_requests):
+                raise ValueError("Batch create returned a different number of items than requested")
+            self._finalize_batched_sync(
+                pending_bookmark_requests=pending_bookmark_requests,
+                created_links=[raindrop.link for raindrop in created_raindrops],
+                result=result,
+                progress_callback=progress_callback,
+            )
+        except Exception as batch_error:
+            logger.warning(
+                "Batch create failed; retrying with individual creates",
+                error=str(batch_error),
+            )
+            self._sync_pending_bookmarks_individually(
+                pending_bookmark_requests=pending_bookmark_requests,
+                result=result,
+                progress_callback=progress_callback,
+            )
+
+    def _finalize_batched_sync(
+        self,
+        pending_bookmark_requests: list[tuple[int, BookmarkItem, list[RaindropCreateRequest]]],
+        created_links: list[str],
+        result: SyncResult,
+        progress_callback: ProgressCallback | None,
+    ) -> None:
+        """Update state/results after a successful batched create."""
+        cursor = 0
+        for idx, bookmark, bookmark_requests in pending_bookmark_requests:
+            request_count = len(bookmark_requests)
+            bookmark_links = created_links[cursor : cursor + request_count]
+            cursor += request_count
+            self._mark_bookmark_synced(
+                idx=idx,
+                bookmark=bookmark,
+                created_links=bookmark_links,
+                result=result,
+                progress_callback=progress_callback,
+            )
+
+    def _sync_pending_bookmarks_individually(
+        self,
+        pending_bookmark_requests: list[tuple[int, BookmarkItem, list[RaindropCreateRequest]]],
+        result: SyncResult,
+        progress_callback: ProgressCallback | None,
+    ) -> None:
+        """Fallback mode when bulk create fails."""
+        for idx, bookmark, bookmark_requests in pending_bookmark_requests:
+            log = logger.bind(
+                tweet_id=bookmark.tweet_id,
+                progress=f"{idx + 1}/{result.total_bookmarks}",
+            )
+            created_links: list[str] = []
+            sync_failed = False
+            for request in bookmark_requests:
+                try:
+                    created = self.raindrop_client.create_raindrop(request)
+                    created_links.append(created.link)
+                    log.info("Created raindrop", link=created.link, raindrop_id=created.id)
+                except Exception as error:
+                    log.error("Failed to create raindrop", link=request.link, error=str(error))
+                    result.add_error(
+                        f"[{bookmark.tweet_id}] Failed to create {request.link}: {error}"
+                    )
+                    sync_failed = True
+                    break
+
+            if sync_failed:
+                result.failed += 1
+                continue
+
+            self._mark_bookmark_synced(
+                idx=idx,
+                bookmark=bookmark,
+                created_links=created_links,
+                result=result,
+                progress_callback=progress_callback,
+            )
+
+    def _mark_bookmark_synced(
+        self,
+        idx: int,
+        bookmark: BookmarkItem,
+        created_links: list[str],
+        result: SyncResult,
+        progress_callback: ProgressCallback | None,
+    ) -> None:
+        """Mark a bookmark as synced and handle optional X deletion."""
+        log = logger.bind(
+            tweet_id=bookmark.tweet_id,
+            progress=f"{idx + 1}/{result.total_bookmarks}",
+        )
+        deleted_from_x = False
+        if self.settings.remove_from_x:
+            try:
+                self.x_client.delete_bookmark(bookmark.tweet_id)
+                deleted_from_x = True
+                result.deleted_from_x += 1
+                log.info("Deleted from X bookmarks")
+            except Exception as error:
+                log.warning("Failed to delete from X", error=str(error))
+                result.add_error(f"[{bookmark.tweet_id}] Failed to delete from X: {error}")
+
+        self.state.mark_synced(
+            bookmark.tweet_id,
+            created_links,
+            deleted_from_x,
+        )
+        result.newly_synced += 1
+        if progress_callback:
+            progress_callback(
+                idx + 1,
+                result.total_bookmarks,
+                f"Synced: {bookmark.tweet_id}",
+            )

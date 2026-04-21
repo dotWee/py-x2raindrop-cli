@@ -1,27 +1,19 @@
-"""X (Twitter) API client for bookmarks operations.
+"""X (Twitter) API client for bookmark operations.
 
-This module provides a thin wrapper around the XDK for fetching
-and managing bookmarks with proper pagination support.
-
-RATE LIMIT NOTES:
-- X API Free Tier: 1 request per 15 minutes per user
-- Basic Tier: Higher limits but still limited
-- Each operation (fetch bookmarks, delete bookmark) counts as a request
-- User ID lookup is cached to avoid extra requests
-- Bookmark deletion requires one API call per bookmark (no batch API)
+This module wraps the official Python XDK client for bookmark workflows while
+keeping the app-specific `BookmarkItem` parsing and request tracking behavior.
 """
 
 from __future__ import annotations
 
 import contextlib
 import re
-import time
 from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-import httpx
 import structlog
+from xdk import Client as XdkClient
 
 from x2raindrop_cli.models import BookmarkItem
 from x2raindrop_cli.x.auth_pkce import OAuth2Token
@@ -31,19 +23,11 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-# X API base URL
-X_API_BASE = "https://api.x.com/2"
-
 # URL pattern for extracting external URLs (non-t.co links)
 URL_PATTERN = re.compile(r"https?://(?!t\.co)[^\s]+")
 
 # Maximum results per page (X API limit)
 MAX_RESULTS_PER_PAGE = 100
-
-# Rate limit retry settings
-DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60  # Default wait if no header
-MAX_RATE_LIMIT_WAIT_SECONDS = 900  # Maximum wait (15 minutes)
-MAX_RETRIES = 5  # Maximum number of retries for rate limits
 
 
 class XClientProtocol(Protocol):
@@ -83,13 +67,8 @@ class XClientProtocol(Protocol):
 class XClient:
     """Client for interacting with X API bookmarks.
 
-    This client uses direct HTTP requests to the X API v2 endpoints
-    for bookmark operations, with OAuth2 bearer token authentication.
-
-    RATE LIMIT AWARENESS:
-    - Tracks API request count for monitoring
-    - Caches user ID to avoid extra requests
-    - Fetches maximum results per page to minimize pagination requests
+    Uses the official Python XDK client for all API operations and tracks the
+    number of API calls performed in this process for visibility.
     """
 
     def __init__(self, token: OAuth2Token) -> None:
@@ -101,13 +80,8 @@ class XClient:
         self.token = token
         self._user_id: str | None = None
         self._request_count: int = 0
-        self._http_client = httpx.Client(
-            base_url=X_API_BASE,
-            headers={
-                "Authorization": f"Bearer {token.access_token}",
-                "Content-Type": "application/json",
-            },
-            timeout=30.0,
+        self._x_client = XdkClient(
+            access_token=token.access_token,
         )
 
     @property
@@ -124,135 +98,21 @@ class XClient:
         self.close()
 
     def close(self) -> None:
-        """Close the HTTP client."""
-        self._http_client.close()
-
-    def _get_rate_limit_wait_time(self, response: httpx.Response) -> int:
-        """Extract wait time from rate limit response headers.
-
-        Args:
-            response: HTTP response with rate limit headers.
-
-        Returns:
-            Number of seconds to wait before retrying.
-        """
-        # Try x-rate-limit-reset header (Unix timestamp)
-        reset_timestamp = response.headers.get("x-rate-limit-reset")
-        if reset_timestamp:
-            try:
-                reset_time = int(reset_timestamp)
-                wait_seconds = max(0, reset_time - int(time.time()))
-                # Add a small buffer
-                return min(wait_seconds + 5, MAX_RATE_LIMIT_WAIT_SECONDS)
-            except (ValueError, TypeError):
-                pass
-
-        # Try Retry-After header (seconds or HTTP date)
-        retry_after = response.headers.get("Retry-After")
-        if retry_after:
-            try:
-                return min(int(retry_after), MAX_RATE_LIMIT_WAIT_SECONDS)
-            except (ValueError, TypeError):
-                pass
-
-        # Default wait time
-        return DEFAULT_RATE_LIMIT_WAIT_SECONDS
-
-    def _make_request(
-        self,
-        method: str,
-        url: str,
-        **kwargs: Any,
-    ) -> httpx.Response:
-        """Make an HTTP request with automatic rate limit retry.
-
-        Handles 429 Too Many Requests errors by waiting and retrying.
-
-        Args:
-            method: HTTP method (GET, POST, DELETE, etc.)
-            url: URL path (relative to base URL)
-            **kwargs: Additional arguments for httpx
-
-        Returns:
-            HTTP response
-
-        Raises:
-            httpx.HTTPStatusError: If the request fails after retries.
-        """
-        self._request_count += 1
-        retries = 0
-
-        while True:
-            logger.debug(
-                "Making X API request",
-                method=method,
-                url=url,
-                request_number=self._request_count,
-                retry=retries,
-            )
-
-            response = self._http_client.request(method, url, **kwargs)
-
-            # Check for rate limit error
-            if response.status_code == 429:
-                retries += 1
-                if retries > MAX_RETRIES:
-                    logger.error(
-                        "Max retries exceeded for rate limit",
-                        retries=retries,
-                        method=method,
-                        url=url,
-                    )
-                    response.raise_for_status()
-
-                wait_seconds = self._get_rate_limit_wait_time(response)
-
-                logger.warning(
-                    "Rate limit hit (429 Too Many Requests). Waiting before retry...",
-                    wait_seconds=wait_seconds,
-                    retry=retries,
-                    max_retries=MAX_RETRIES,
-                    method=method,
-                    url=url,
-                )
-
-                # Log remaining rate limit info if available
-                remaining = response.headers.get("x-rate-limit-remaining")
-                limit = response.headers.get("x-rate-limit-limit")
-                if remaining or limit:
-                    logger.info(
-                        "Rate limit info",
-                        remaining=remaining,
-                        limit=limit,
-                    )
-
-                # Wait before retrying
-                logger.info(f"Sleeping for {wait_seconds} seconds...")
-                time.sleep(wait_seconds)
-                continue
-
-            # Success or other error
-            response.raise_for_status()
-            return response
+        """Close the underlying XDK session."""
+        self._x_client.session.close()
 
     def get_authenticated_user_id(self) -> str:
         """Get the authenticated user's ID.
 
-        NOTE: This makes an API request if not cached. Consider if you
-        can get the user ID from another response (e.g., token metadata).
-
         Returns:
             User ID string.
-
-        Raises:
-            httpx.HTTPStatusError: If the request fails.
         """
         if self._user_id is not None:
             return self._user_id
 
-        response = self._make_request("GET", "/users/me")
-        data = response.json()
-        self._user_id = data["data"]["id"]
+        self._request_count += 1
+        response = self._x_client.users.get_me()
+        self._user_id = self._extract_id_from_me_response(response)
         logger.debug("Got user ID", user_id=self._user_id)
         return self._user_id
 
@@ -271,58 +131,47 @@ class XClient:
     def get_bookmarks(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
         """Fetch bookmarks from X with pagination.
 
-        NOTE: Each page of results requires one API request. With rate limits,
-        pagination may be slow. The client fetches the maximum allowed per page
-        (100) to minimize requests.
-
         Args:
             max_results: Maximum total results to fetch. None for all.
 
         Yields:
             BookmarkItem for each bookmark.
 
-        Raises:
-            httpx.HTTPStatusError: If the request fails.
         """
         user_id = self.get_authenticated_user_id()
         total_fetched = 0
-        pagination_token: str | None = None
         page_count = 0
-
-        # Request maximum results per page to minimize API calls
-        # Also request all needed expansions in a single call
-        params: dict[str, Any] = {
-            "max_results": MAX_RESULTS_PER_PAGE,  # Always fetch max to minimize requests
-            "expansions": "author_id",
-            "tweet.fields": "created_at,text,entities,author_id",
-            "user.fields": "username,name",
-        }
-
-        while True:
-            if pagination_token:
-                params["pagination_token"] = pagination_token
-
+        for page in self._x_client.users.get_bookmarks(
+            id=user_id,
+            max_results=MAX_RESULTS_PER_PAGE,
+            expansions=["author_id"],
+            tweet_fields=["created_at", "text", "entities", "author_id"],
+            user_fields=["username", "name"],
+        ):
             page_count += 1
-            logger.debug(
-                "Fetching bookmarks page",
-                page=page_count,
-                pagination_token=pagination_token,
-            )
-
-            response = self._make_request("GET", f"/users/{user_id}/bookmarks", params=params)
-            data = response.json()
+            self._request_count += 1
+            logger.debug("Fetching bookmarks page", page=page_count)
+            data = self._model_to_dict(page)
 
             # Build user lookup for author info
             users_lookup: dict[str, dict[str, str]] = {}
-            if "includes" in data and "users" in data["includes"]:
-                for user in data["includes"]["users"]:
-                    users_lookup[user["id"]] = {
-                        "username": user.get("username", ""),
-                        "name": user.get("name", ""),
-                    }
+            includes = data.get("includes", {})
+            include_users = includes.get("users", []) if isinstance(includes, dict) else []
+            for user in include_users:
+                if not isinstance(user, dict):
+                    continue
+                user_id_raw = user.get("id")
+                if user_id_raw is None:
+                    continue
+                users_lookup[str(user_id_raw)] = {
+                    "username": str(user.get("username", "")),
+                    "name": str(user.get("name", "")),
+                }
 
             # Process tweets
             tweets = data.get("data", [])
+            if not isinstance(tweets, list):
+                tweets = []
             if not tweets:
                 logger.info(
                     "No bookmarks found or end of results",
@@ -332,6 +181,8 @@ class XClient:
                 break
 
             for tweet in tweets:
+                if not isinstance(tweet, dict):
+                    continue
                 bookmark = self._parse_tweet(tweet, users_lookup)
                 yield bookmark
                 total_fetched += 1
@@ -344,18 +195,35 @@ class XClient:
                     )
                     return
 
-            # Check for next page
-            meta = data.get("meta", {})
-            pagination_token = meta.get("next_token")
-            if not pagination_token:
-                break
-
         logger.info(
             "Fetched all bookmarks",
             total=total_fetched,
             pages_fetched=page_count,
             api_requests=self._request_count,
         )
+
+    def _model_to_dict(self, model: Any) -> dict[str, Any]:
+        """Convert an XDK response model into a dictionary."""
+        if isinstance(model, dict):
+            return model
+        if hasattr(model, "model_dump"):
+            dumped = model.model_dump()
+            if isinstance(dumped, dict):
+                return dumped
+        return {}
+
+    def _extract_id_from_me_response(self, response: Any) -> str:
+        """Extract authenticated user ID from XDK get_me response."""
+        data: Any = getattr(response, "data", None)
+        if data is None:
+            data = self._model_to_dict(response).get("data")
+        if isinstance(data, dict):
+            user_id = data.get("id")
+            if user_id is not None:
+                return str(user_id)
+        if hasattr(data, "id"):
+            return str(data.id)
+        raise ValueError("X get_me response does not contain a user ID")
 
     def _parse_tweet(
         self, tweet: dict[str, Any], users_lookup: dict[str, dict[str, str]]
@@ -446,30 +314,25 @@ class XClient:
     def delete_bookmark(self, tweet_id: str) -> bool:
         """Remove a tweet from bookmarks.
 
-        WARNING: Each delete operation requires one API request.
-        With X API Free Tier (1 request/15 min), this is very expensive.
-        Consider using --no-remove-from-x to avoid hitting rate limits.
-
         Args:
             tweet_id: ID of the tweet to unbookmark.
 
         Returns:
             True if successful.
-
-        Raises:
-            httpx.HTTPStatusError: If the request fails.
         """
         user_id = self.get_authenticated_user_id()
+        self._request_count += 1
 
         logger.warning(
             "Deleting bookmark (uses 1 API request)",
             tweet_id=tweet_id,
-            total_requests=self._request_count + 1,
+            total_requests=self._request_count,
         )
 
-        response = self._make_request("DELETE", f"/users/{user_id}/bookmarks/{tweet_id}")
-        data = response.json()
-        success = data.get("data", {}).get("bookmarked") is False
+        response = self._x_client.users.delete_bookmark(id=user_id, tweet_id=tweet_id)
+        response_data = self._model_to_dict(response)
+        data = response_data.get("data", {})
+        success = isinstance(data, dict) and data.get("bookmarked") is False
 
         if success:
             logger.debug("Deleted bookmark", tweet_id=tweet_id)
