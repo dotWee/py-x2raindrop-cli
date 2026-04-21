@@ -192,6 +192,8 @@ class TestSyncService:
         assert result.already_synced == 0
         assert result.failed == 0
         assert len(mock_raindrop_client.created_raindrops) == 3
+        assert len(mock_raindrop_client.batch_create_calls) == 1
+        assert len(mock_raindrop_client.batch_create_calls[0]) == 3
 
     def test_sync_skips_already_synced(
         self,
@@ -431,6 +433,8 @@ class TestSyncServiceIntegration:
         # First bookmark should create 2 raindrops (external + permalink)
         # Second bookmark should create 1 raindrop (permalink only)
         assert len(mock_raindrop_client.created_raindrops) == 3
+        assert len(mock_raindrop_client.batch_create_calls) == 1
+        assert len(mock_raindrop_client.batch_create_calls[0]) == 3
 
         created_links = [r.link for r in mock_raindrop_client.created_raindrops]
         assert "https://external.com" in created_links

@@ -144,6 +144,30 @@ class TestMockRaindropClient:
         assert result1.id == 1
         assert result2.id == 2
 
+    def test_create_raindrops_tracks_batch_call(self) -> None:
+        """Test create_raindrops tracks a batch request."""
+        client = MockRaindropClient()
+
+        requests = [
+            RaindropCreateRequest(
+                link="https://example1.com",
+                collection_id=100,
+                source_tweet_id="1",
+            ),
+            RaindropCreateRequest(
+                link="https://example2.com",
+                collection_id=100,
+                source_tweet_id="2",
+            ),
+        ]
+
+        result = client.create_raindrops(requests)
+
+        assert len(result) == 2
+        assert len(client.batch_create_calls) == 1
+        assert len(client.batch_create_calls[0]) == 2
+        assert [item.id for item in result] == [1, 2]
+
     def test_check_link_exists_after_create(self) -> None:
         """Test check_link_exists after creating a raindrop."""
         client = MockRaindropClient()

@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+# Maximum number of items accepted by Raindrop bulk create endpoint
+MAX_BATCH_CREATE_SIZE = 100
+
 
 @dataclass
 class RaindropCollection:
@@ -84,6 +87,19 @@ class RaindropClientProtocol(Protocol):
 
         Returns:
             Created Raindrop details.
+        """
+        ...
+
+    def create_raindrops(
+        self, requests: list[RaindropCreateRequest]
+    ) -> list[CreatedRaindrop]:
+        """Create multiple Raindrop bookmarks in batches.
+
+        Args:
+            requests: Details of bookmarks to create.
+
+        Returns:
+            Created Raindrop details in the same order as requests.
         """
         ...
 
@@ -233,27 +249,7 @@ class RaindropClient:
         Raises:
             Exception: If creation fails.
         """
-        collection_ref = self.get_collection_ref(request.collection_id)
-
-        # Build kwargs for Raindrop.create
-        create_kwargs: dict[str, Any] = {
-            "link": request.link,
-            "collection": collection_ref,
-        }
-
-        if request.tags:
-            create_kwargs["tags"] = request.tags
-
-        if request.title:
-            create_kwargs["title"] = request.title
-
-        if request.excerpt:
-            create_kwargs["excerpt"] = request.excerpt
-
-        # Note: python-raindropio may not support 'note' field directly
-        # We'll include it in excerpt if note is provided but excerpt is not
-        if request.note and not request.excerpt:
-            create_kwargs["excerpt"] = request.note
+        create_kwargs = self._request_to_create_kwargs(request)
 
         logger.debug(
             "Creating raindrop",
@@ -277,6 +273,102 @@ class RaindropClient:
             title=raindrop.title or "",
             collection_id=request.collection_id,
         )
+
+    def _request_to_create_kwargs(self, request: RaindropCreateRequest) -> dict[str, Any]:
+        """Convert a request model to kwargs accepted by `Raindrop.create`."""
+        collection_ref = self.get_collection_ref(request.collection_id)
+
+        create_kwargs: dict[str, Any] = {
+            "link": request.link,
+            "collection": collection_ref,
+        }
+        if request.tags:
+            create_kwargs["tags"] = request.tags
+        if request.title:
+            create_kwargs["title"] = request.title
+        if request.excerpt:
+            create_kwargs["excerpt"] = request.excerpt
+        # Note: python-raindropio may not support a dedicated note field.
+        if request.note and not request.excerpt:
+            create_kwargs["excerpt"] = request.note
+        return create_kwargs
+
+    def _request_to_bulk_payload(self, request: RaindropCreateRequest) -> dict[str, Any]:
+        """Convert a request model to payload accepted by bulk create endpoint."""
+        create_kwargs = self._request_to_create_kwargs(request)
+        collection = create_kwargs.pop("collection", None)
+        payload: dict[str, Any] = {"link": create_kwargs["link"]}
+
+        if collection is not None:
+            if isinstance(collection, (Collection, CollectionRef)):
+                payload["collection"] = {"$id": collection.id}
+            elif isinstance(collection, int):
+                payload["collection"] = {"$id": collection}
+        if "tags" in create_kwargs:
+            payload["tags"] = create_kwargs["tags"]
+        if "title" in create_kwargs:
+            payload["title"] = create_kwargs["title"]
+        if "excerpt" in create_kwargs:
+            payload["excerpt"] = create_kwargs["excerpt"]
+
+        return payload
+
+    def create_raindrops(
+        self, requests: list[RaindropCreateRequest]
+    ) -> list[CreatedRaindrop]:
+        """Create multiple Raindrop bookmarks using the bulk endpoint.
+
+        Raindrop currently accepts up to 100 items per request, so larger
+        payloads are automatically split into multiple API calls.
+        """
+        if not requests:
+            return []
+
+        created_raindrops: list[CreatedRaindrop] = []
+        bulk_create_url = "https://api.raindrop.io/rest/v1/raindrops"
+
+        for batch_start in range(0, len(requests), MAX_BATCH_CREATE_SIZE):
+            batch_requests = requests[batch_start : batch_start + MAX_BATCH_CREATE_SIZE]
+            payload = {"items": [self._request_to_bulk_payload(r) for r in batch_requests]}
+
+            logger.debug(
+                "Creating raindrops batch",
+                batch_size=len(batch_requests),
+                total_requests=len(requests),
+            )
+            response = self.api.post(bulk_create_url, json=payload)
+            response.raise_for_status()
+            response_data = response.json()
+
+            items = response_data.get("items", [])
+            if not isinstance(items, list) or len(items) != len(batch_requests):
+                msg = (
+                    "Unexpected bulk create response: number of returned items does not "
+                    "match the request size"
+                )
+                raise ValueError(msg)
+
+            for request, item in zip(batch_requests, items, strict=True):
+                if not isinstance(item, dict):
+                    raise ValueError("Unexpected bulk create response: item is not an object")
+
+                item_id = item.get("_id", item.get("id"))
+                if item_id is None:
+                    raise ValueError("Unexpected bulk create response: missing item id")
+
+                item_title = item.get("title")
+                item_link = item.get("link", request.link)
+                created_raindrops.append(
+                    CreatedRaindrop(
+                        id=int(item_id),
+                        link=str(item_link),
+                        title=str(item_title) if item_title is not None else (request.title or ""),
+                        collection_id=request.collection_id,
+                    )
+                )
+
+        logger.info("Created raindrops in bulk", count=len(created_raindrops))
+        return created_raindrops
 
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if a link already exists in Raindrop.
@@ -323,6 +415,7 @@ class MockRaindropClient:
             RaindropCollection(id=-1, title="Unsorted", count=0),
         ]
         self.created_raindrops: list[RaindropCreateRequest] = []
+        self.batch_create_calls: list[list[RaindropCreateRequest]] = []
         self._next_id = 1
 
     def list_collections(self) -> list[RaindropCollection]:
@@ -348,6 +441,13 @@ class MockRaindropClient:
             title=request.title or "",
             collection_id=request.collection_id,
         )
+
+    def create_raindrops(
+        self, requests: list[RaindropCreateRequest]
+    ) -> list[CreatedRaindrop]:
+        """Track bulk-created raindrops in order."""
+        self.batch_create_calls.append(list(requests))
+        return [self.create_raindrop(request) for request in requests]
 
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if link was already created in this session."""
