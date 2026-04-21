@@ -2,108 +2,58 @@
 name = "x2raindrop-cli"
 version = "1.0.0"
 description = "CLI tool to sync X (Twitter) Bookmarks to Raindrop.io"
-authors = [
-    {name = "Lukas Wolfsteiner",email = "lukas@wolfsteiner.media"}
-]
 readme = "README.md"
 requires-python = ">=3.12"
-keywords = ["twitter", "x", "raindrop", "bookmarks", "sync", "cli"]
+license-files = ["LICENSE"]
+authors = [{ name = "Lukas Wolfsteiner", email = "lukas@wolfsteiner.media" }]
+keywords = ["bookmarks", "cli", "raindrop", "sync", "twitter", "x"]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Environment :: Console",
-    "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Internet",
-    "Topic :: Utilities",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet",
+  "Topic :: Utilities",
 ]
 dependencies = [
-    "xdk>=0.9.0",
-    "python-raindropio>=0.0.4",
-    "typer>=0.24.1",
-    "rich>=15.0.0",
-    "pydantic>=2.13.3",
-    "pydantic-settings>=2.14.0",
-    "python-dotenv>=1.2.2",
-    "structlog>=25.5.0",
-    "httpx>=0.28.1",
-    "tomli-w>=1.2.0",
+  "httpx>=0.28.1",
+  "pydantic>=2.13.3",
+  "pydantic-settings>=2.14.0",
+  "python-dotenv>=1.2.2",
+  "python-raindropio>=0.0.4",
+  "rich>=15.0.0",
+  "structlog>=25.5.0",
+  "tomli-w>=1.2.0",
+  "typer>=0.24.1",
+  "xdk>=0.9.0",
 ]
-license = {file = "LICENSE"}
 
 [project.urls]
 Homepage = "https://github.com/dotWee/x2raindrop-cli"
-Repository = "https://github.com/dotWee/x2raindrop-cli"
 Issues = "https://github.com/dotWee/x2raindrop-cli/issues"
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=5.0.0",
-    "pytest-mock>=3.14.0",
-    "pytest-asyncio>=0.23.0",
-    "ruff>=0.15.11",
-    "mypy>=1.10.0",
-    "types-requests>=2.32.0",
-]
+Repository = "https://github.com/dotWee/x2raindrop-cli"
 
 [project.scripts]
 x2raindrop = "x2raindrop_cli.cli:app"
 
-[tool.poetry]
-packages = [{include = "x2raindrop_cli", from = "src"}]
-
-[tool.poetry.group.dev.dependencies]
-pytest = ">=9.0.3"
-pytest-cov = ">=7.1.0"
-pytest-mock = ">=3.15.1"
-pytest-asyncio = ">=1.3.0"
-ruff = ">=0.15.11"
-mypy = ">=1.20.1"
-types-requests = ">=2.33.0.20260408"
+[dependency-groups]
+dev = [
+  "pytest>=9.0.3",
+  "pytest-asyncio>=1.3.0",
+  "pytest-cov>=7.1.0",
+  "pytest-mock>=3.15.1",
+  "ruff>=0.15.11",
+  "types-requests>=2.33.0.20260408",
+  "ty>=0.0.32",
+]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.ruff]
-line-length = 100
-# Python version is inferred from requires-python in [project]
-src = ["src", "tests"]
-
-[tool.ruff.lint]
-select = [
-    "E",      # pycodestyle errors
-    "W",      # pycodestyle warnings
-    "F",      # pyflakes
-    "I",      # isort
-    "B",      # flake8-bugbear
-    "C4",     # flake8-comprehensions
-    "UP",     # pyupgrade
-    "ARG",    # flake8-unused-arguments
-    "SIM",    # flake8-simplify
-]
-ignore = [
-    "E501",   # line too long (handled by formatter)
-    "B008",   # do not perform function calls in argument defaults
-]
-
-[tool.ruff.lint.isort]
-known-first-party = ["x2raindrop_cli"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_functions = ["test_*"]
-addopts = [
-    "--cov=x2raindrop_cli",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "-v",
-]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
 
 [tool.coverage.run]
 source = ["src/x2raindrop_cli"]
@@ -112,24 +62,57 @@ omit = ["*/tests/*", "*/__init__.py"]
 
 [tool.coverage.report]
 exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise NotImplementedError",
-    "if TYPE_CHECKING:",
-    "if __name__ == .__main__.:",
+  "pragma: no cover",
+  "def __repr__",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
 ]
 
-[tool.mypy]
-python_version = "3.12"
-strict = true
-warn_return_any = true
-warn_unused_ignores = true
-disallow_untyped_defs = true
-plugins = ["pydantic.mypy"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/x2raindrop_cli"]
 
-[[tool.mypy.overrides]]
-module = [
-    "raindropio.*",
-    "xdk.*",
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+possibly-unresolved-reference = "warn"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.pytest]
+addopts = [
+  "--cov-report=html",
+  "--cov-report=term-missing",
+  "--cov=x2raindrop_cli",
+  "-v",
 ]
-ignore_missing_imports = true
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+# Python version is inferred from requires-python in [project]
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",  # pycodestyle errors
+  "W",  # pycodestyle warnings
+  "F",  # pyflakes
+  "I",  # isort
+  "B",  # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "UP",  # pyupgrade
+  "ARG",  # flake8-unused-arguments
+  "SIM",  # flake8-simplify
+]
+ignore = [
+  "E501",  # line too long (handled by formatter)
+  "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["x2raindrop_cli"]
