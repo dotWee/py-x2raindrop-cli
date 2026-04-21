@@ -68,6 +68,23 @@ app.add_typer(config_app, name="config")
 console = Console()
 
 
+def _get_pkce_client_id(settings: Settings) -> str:
+    """Return PKCE client ID when PKCE flow is available.
+
+    Args:
+        settings: Application settings.
+
+    Returns:
+        Non-null PKCE client ID.
+
+    Raises:
+        ValueError: If PKCE flow cannot be used or client ID is missing.
+    """
+    if not settings.x.can_use_pkce_flow() or settings.x.client_id is None:
+        raise ValueError("PKCE flow requires X client ID")
+    return settings.x.client_id
+
+
 def _get_x_token(settings: Settings) -> OAuth2Token | None:
     """Get X authentication token from settings.
 
@@ -89,7 +106,7 @@ def _get_x_token(settings: Settings) -> OAuth2Token | None:
     # Fall back to PKCE flow if client_id is configured
     if settings.x.can_use_pkce_flow():
         auth_flow = PKCEAuthFlow(
-            client_id=settings.x.client_id,  # type: ignore[arg-type]
+            client_id=_get_pkce_client_id(settings),
             client_secret=settings.x.client_secret,
             redirect_uri=settings.x.redirect_uri,
             scopes=settings.x.scopes,
@@ -361,7 +378,7 @@ def x_login(
             raise typer.Exit(1)
 
         auth_flow = PKCEAuthFlow(
-            client_id=settings.x.client_id,  # type: ignore[arg-type]
+            client_id=_get_pkce_client_id(settings),
             client_secret=settings.x.client_secret,
             redirect_uri=settings.x.redirect_uri,
             scopes=settings.x.scopes,
@@ -420,7 +437,7 @@ def x_status(
         # Check PKCE flow token
         if settings.x.can_use_pkce_flow():
             auth_flow = PKCEAuthFlow(
-                client_id=settings.x.client_id,  # type: ignore[arg-type]
+                client_id=_get_pkce_client_id(settings),
                 client_secret=settings.x.client_secret,
                 redirect_uri=settings.x.redirect_uri,
                 scopes=settings.x.scopes,
@@ -485,7 +502,7 @@ def x_logout(
         # Clear PKCE tokens if configured
         if settings.x.can_use_pkce_flow():
             auth_flow = PKCEAuthFlow(
-                client_id=settings.x.client_id,  # type: ignore[arg-type]
+                client_id=_get_pkce_client_id(settings),
                 client_secret=settings.x.client_secret,
                 redirect_uri=settings.x.redirect_uri,
                 scopes=settings.x.scopes,

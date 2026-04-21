@@ -51,9 +51,6 @@ Thumbs.db
 # Documentation build
 docs/_build/
 
-# Poetry lock (we want fresh installs in Docker)
-poetry.lock
-
 # GitHub workflows (not needed in image)
 .github/
 

@@ -23,7 +23,7 @@ A Python CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
 ## Requirements
 
 - Python 3.12 or higher
-- Poetry for dependency management
+- uv for dependency and environment management
 - X Developer account with OAuth 2.0 app
 - Raindrop.io account with API token
 
@@ -41,8 +41,8 @@ pip install x2raindrop-cli
 git clone https://github.com/dotWee/x2raindrop-cli.git
 cd x2raindrop-cli
 
-# Install with Poetry
-poetry install
+# Install dependencies
+uv sync
 ```
 
 ### Using Docker
@@ -116,7 +116,7 @@ Create a configuration file:
 
 ```bash
 # Create default config file in current directory
-poetry run x2raindrop config init
+uv run x2raindrop config init
 
 # Edit the config file
 nano config.toml
@@ -150,7 +150,7 @@ export SYNC_LINK_MODE="permalink"  # permalink, first_external_url, or both
 First, authenticate with X using the interactive OAuth 2.0 PKCE flow:
 
 ```bash
-poetry run x2raindrop x login
+uv run x2raindrop x login
 ```
 
 This will open your browser for authorization. After approving, the tokens are saved locally.
@@ -160,7 +160,7 @@ This will open your browser for authorization. After approving, the tokens are s
 Find the collection ID you want to sync to:
 
 ```bash
-poetry run x2raindrop raindrop collections
+uv run x2raindrop raindrop collections
 ```
 
 ### Sync Bookmarks
@@ -168,35 +168,35 @@ poetry run x2raindrop raindrop collections
 Basic sync:
 
 ```bash
-poetry run x2raindrop sync --collection 12345
+uv run x2raindrop sync --collection 12345
 ```
 
 With options:
 
 ```bash
 # Sync with custom tags
-poetry run x2raindrop sync --collection 12345 --tags "x,bookmarks,auto"
+uv run x2raindrop sync --collection 12345 --tags "x,bookmarks,auto"
 
 # Use first external URL from tweets
-poetry run x2raindrop sync --collection 12345 --link-mode first_external_url
+uv run x2raindrop sync --collection 12345 --link-mode first_external_url
 
 # Remove from X after syncing (use with caution!)
-poetry run x2raindrop sync --collection 12345 --remove-from-x
+uv run x2raindrop sync --collection 12345 --remove-from-x
 
 # Dry run - see what would happen without making changes
-poetry run x2raindrop sync --collection 12345 --dry-run
+uv run x2raindrop sync --collection 12345 --dry-run
 ```
 
 ### Check X Authentication Status
 
 ```bash
-poetry run x2raindrop x status
+uv run x2raindrop x status
 ```
 
 ### Logout from X
 
 ```bash
-poetry run x2raindrop x logout
+uv run x2raindrop x logout
 ```
 
 ## Configuration Reference
@@ -377,32 +377,32 @@ Always mount a volume to `/data` to persist this data between runs.
 ### Setup Development Environment
 
 ```bash
-poetry install --with dev
+uv sync --group dev
 ```
 
 ### Run Tests
 
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
 ### Run Tests with Coverage
 
 ```bash
-poetry run pytest --cov=x2raindrop_cli --cov-report=html
+uv run pytest --cov=x2raindrop_cli --cov-report=html
 ```
 
 ### Linting
 
 ```bash
-poetry run ruff check src tests
-poetry run ruff format src tests
+uv run ruff check src tests
+uv run ruff format src tests
 ```
 
 ### Type Checking
 
 ```bash
-poetry run mypy src
+uv run ty check src
 ```
 
 ## Troubleshooting

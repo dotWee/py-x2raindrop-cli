@@ -278,7 +278,7 @@ class RaindropClient:
             collection_id=request.collection_id,
         )
 
-    def check_link_exists(self, link: str, _collection_id: int | None = None) -> bool:
+    def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if a link already exists in Raindrop.
 
         Note: This is a basic implementation that searches through pages.
@@ -286,7 +286,7 @@ class RaindropClient:
 
         Args:
             link: URL to check.
-            _collection_id: Optional collection to search in (currently unused).
+            collection_id: Optional collection to search in (currently unused).
 
         Returns:
             True if the link exists.
@@ -294,7 +294,11 @@ class RaindropClient:
         # Raindrop.search doesn't have a direct URL filter
         # We would need to iterate through results
         # For now, return False and rely on our local state for deduplication
-        logger.debug("Link existence check skipped (using local state)", link=link)
+        logger.debug(
+            "Link existence check skipped (using local state)",
+            link=link,
+            collection_id=collection_id,
+        )
         return False
 
 
@@ -345,6 +349,7 @@ class MockRaindropClient:
             collection_id=request.collection_id,
         )
 
-    def check_link_exists(self, link: str, _collection_id: int | None = None) -> bool:
+    def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if link was already created in this session."""
+        del collection_id
         return any(r.link == link for r in self.created_raindrops)

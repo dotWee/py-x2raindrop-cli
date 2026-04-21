@@ -228,14 +228,18 @@ def exchange_code_for_token(
     }
 
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    auth = None
-
-    if client_secret:
-        # Use Basic auth for confidential clients
-        auth = httpx.BasicAuth(client_id, client_secret)
 
     with httpx.Client() as client:
-        response = client.post(X_TOKEN_URL, data=data, headers=headers, auth=auth)
+        if client_secret:
+            # Use Basic auth for confidential clients
+            response = client.post(
+                X_TOKEN_URL,
+                data=data,
+                headers=headers,
+                auth=httpx.BasicAuth(client_id, client_secret),
+            )
+        else:
+            response = client.post(X_TOKEN_URL, data=data, headers=headers)
         response.raise_for_status()
         token_data = response.json()
 
@@ -276,13 +280,17 @@ def refresh_access_token(
     }
 
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    auth = None
-
-    if client_secret:
-        auth = httpx.BasicAuth(client_id, client_secret)
 
     with httpx.Client() as client:
-        response = client.post(X_TOKEN_URL, data=data, headers=headers, auth=auth)
+        if client_secret:
+            response = client.post(
+                X_TOKEN_URL,
+                data=data,
+                headers=headers,
+                auth=httpx.BasicAuth(client_id, client_secret),
+            )
+        else:
+            response = client.post(X_TOKEN_URL, data=data, headers=headers)
         response.raise_for_status()
         token_data = response.json()
 
