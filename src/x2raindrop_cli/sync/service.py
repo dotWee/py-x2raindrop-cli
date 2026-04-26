@@ -179,6 +179,7 @@ class SyncService:
         logger.info("Found bookmarks", count=result.total_bookmarks)
 
         pending_bookmark_requests: list[tuple[int, BookmarkItem, list[RaindropCreateRequest]]] = []
+        checked_link_cache: dict[tuple[int, str], bool] = {}
 
         # Build request payloads for each bookmark
         for idx, bookmark in enumerate(bookmarks):
@@ -207,6 +208,27 @@ class SyncService:
                 result.failed += 1
                 result.add_error(f"[{bookmark.tweet_id}] {e}")
                 continue
+
+            if self.settings.skip_existing_links:
+                requests = self._filter_existing_requests(
+                    requests=requests,
+                    checked_link_cache=checked_link_cache,
+                )
+                if not requests:
+                    log.debug("Skipping bookmark with links already in Raindrop")
+                    self.state.mark_synced(
+                        bookmark.tweet_id,
+                        [],
+                        deleted_from_x=False,
+                    )
+                    result.already_synced += 1
+                    if progress_callback:
+                        progress_callback(
+                            idx + 1,
+                            result.total_bookmarks,
+                            f"Skipped (existing links): {bookmark.tweet_id}",
+                        )
+                    continue
 
             # Dry run mode
             if self.settings.dry_run:
@@ -244,6 +266,26 @@ class SyncService:
         )
 
         return result
+
+    def _filter_existing_requests(
+        self,
+        requests: list[RaindropCreateRequest],
+        checked_link_cache: dict[tuple[int, str], bool],
+    ) -> list[RaindropCreateRequest]:
+        """Filter out requests whose links already exist in Raindrop."""
+        filtered: list[RaindropCreateRequest] = []
+        for request in requests:
+            cache_key = (request.collection_id, request.link)
+            exists = checked_link_cache.get(cache_key)
+            if exists is None:
+                exists = self.raindrop_client.check_link_exists(
+                    request.link,
+                    collection_id=request.collection_id,
+                )
+                checked_link_cache[cache_key] = exists
+            if not exists:
+                filtered.append(request)
+        return filtered
 
     def _sync_pending_bookmarks(
         self,

@@ -187,6 +187,13 @@ def sync(
             help="Remove bookmarks from X after syncing",
         ),
     ] = False,
+    skip_existing_links: Annotated[
+        bool | None,
+        typer.Option(
+            "--skip-existing-links/--no-skip-existing-links",
+            help="Skip links already present in Raindrop",
+        ),
+    ] = None,
     link_mode: Annotated[
         LinkMode | None,
         typer.Option(
@@ -220,6 +227,8 @@ def sync(
             settings.sync.tags = [t.strip() for t in tags.split(",") if t.strip()]
         if remove_from_x:
             settings.sync.remove_from_x = True
+        if skip_existing_links is not None:
+            settings.sync.skip_existing_links = skip_existing_links
         if link_mode is not None:
             settings.sync.link_mode = link_mode
         if dry_run:
@@ -270,6 +279,10 @@ def sync(
         table.add_row("Tags", ", ".join(settings.sync.tags) or "(none)")
         table.add_row("Link Mode", settings.sync.link_mode.value)
         table.add_row("Remove from X", "Yes" if settings.sync.remove_from_x else "No")
+        table.add_row(
+            "Skip Existing Links",
+            "Yes" if settings.sync.skip_existing_links else "No",
+        )
         console.print(table)
         console.print()
 
@@ -657,6 +670,7 @@ def config_show(
         )
         table.add_row("Tags", ", ".join(settings.sync.tags) or "(none)")
         table.add_row("Remove from X", str(settings.sync.remove_from_x))
+        table.add_row("Skip Existing Links", str(settings.sync.skip_existing_links))
         table.add_row("Link Mode", settings.sync.link_mode.value)
         table.add_row("Both Behavior", settings.sync.both_behavior.value)
         table.add_row("State Path", str(settings.sync.state_path))

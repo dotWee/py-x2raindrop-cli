@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
+from urllib.parse import quote
 
 import structlog
 from raindropio import API, Collection, CollectionRef, Raindrop
@@ -372,25 +373,40 @@ class RaindropClient:
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if a link already exists in Raindrop.
 
-        Note: This is a basic implementation that searches through pages.
-        For large collections, this may be slow.
-
         Args:
             link: URL to check.
-            collection_id: Optional collection to search in (currently unused).
+            collection_id: Optional collection to search in.
 
         Returns:
             True if the link exists.
         """
-        # Raindrop.search doesn't have a direct URL filter
-        # We would need to iterate through results
-        # For now, return False and rely on our local state for deduplication
-        logger.debug(
-            "Link existence check skipped (using local state)",
-            link=link,
-            collection_id=collection_id,
+        normalized_link = self._normalize_link(link)
+        collection_path = str(collection_id) if collection_id is not None else "0"
+        search_term = quote(link, safe="")
+        search_url = (
+            f"https://api.raindrop.io/rest/v1/raindrops/{collection_path}"
+            f"?search={search_term}&perpage=100"
         )
+        response = self.api.get(search_url)
+        response.raise_for_status()
+        response_data = response.json()
+        items = response_data.get("items", [])
+        if not isinstance(items, list):
+            return False
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_link = item.get("link")
+            if not isinstance(item_link, str):
+                continue
+            if self._normalize_link(item_link) == normalized_link:
+                return True
         return False
+
+    def _normalize_link(self, link: str) -> str:
+        """Normalize links to avoid false negatives on trailing slashes."""
+        return link.strip().rstrip("/")
 
 
 class MockRaindropClient:
@@ -403,11 +419,13 @@ class MockRaindropClient:
     def __init__(
         self,
         collections: list[RaindropCollection] | None = None,
+        existing_links: list[str] | None = None,
     ) -> None:
         """Initialize mock client.
 
         Args:
             collections: List of collections to return.
+            existing_links: Links already present in Raindrop.
         """
         self.collections = collections or [
             RaindropCollection(id=12345, title="Test Collection", count=0),
@@ -416,6 +434,7 @@ class MockRaindropClient:
         self.created_raindrops: list[RaindropCreateRequest] = []
         self.batch_create_calls: list[list[RaindropCreateRequest]] = []
         self._next_id = 1
+        self.existing_links = {self._normalize_link(link) for link in existing_links or []}
 
     def list_collections(self) -> list[RaindropCollection]:
         """Return pre-configured collections."""
@@ -449,4 +468,11 @@ class MockRaindropClient:
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if link was already created in this session."""
         del collection_id
-        return any(r.link == link for r in self.created_raindrops)
+        normalized = self._normalize_link(link)
+        if normalized in self.existing_links:
+            return True
+        return any(self._normalize_link(r.link) == normalized for r in self.created_raindrops)
+
+    def _normalize_link(self, link: str) -> str:
+        """Normalize links for duplicate checks."""
+        return link.strip().rstrip("/")
