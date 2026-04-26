@@ -70,6 +70,7 @@ class XSettings(BaseSettings):
         token_path: Path to store the OAuth2 tokens.
         scopes: OAuth2 scopes to request.
         access_token: Direct access token (alternative to PKCE flow).
+        refresh_token: Refresh token for direct access token refresh (optional).
         bearer_token: App-only bearer token (limited functionality, read-only).
     """
 
@@ -99,6 +100,10 @@ class XSettings(BaseSettings):
     access_token: str | None = Field(
         None,
         description="Direct OAuth2 access token (skips browser login)",
+    )
+    refresh_token: str | None = Field(
+        None,
+        description="Direct OAuth2 refresh token (enables automatic access token refresh)",
     )
     bearer_token: str | None = Field(
         None,
@@ -305,6 +310,8 @@ def create_default_config(path: Path | None = None) -> Path:
             # Option 1: Direct access token (simplest, no browser login needed)
             # Get this from X Developer Portal or existing OAuth flow
             "access_token": "",
+            # Optional: provide refresh token to auto-refresh access token
+            "refresh_token": "",
             # Option 2: OAuth PKCE flow (interactive browser login)
             # Set client_id to enable `x2raindrop x login`
             "client_id": "",

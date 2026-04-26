@@ -16,7 +16,7 @@ import structlog
 from xdk import Client as XdkClient
 
 from x2raindrop_cli.models import BookmarkItem
-from x2raindrop_cli.x.auth_pkce import OAuth2Token
+from x2raindrop_cli.x.auth_pkce import OAuth2Token, refresh_access_token
 
 if TYPE_CHECKING:
     pass
@@ -71,18 +71,29 @@ class XClient:
     number of API calls performed in this process for visibility.
     """
 
-    def __init__(self, token: OAuth2Token) -> None:
+    def __init__(
+        self,
+        token: OAuth2Token,
+        *,
+        refresh_client_id: str | None = None,
+        refresh_client_secret: str | None = None,
+    ) -> None:
         """Initialize the client with an OAuth2 token.
 
         Args:
             token: OAuth2 token for authentication.
+            refresh_client_id: OAuth2 client ID used to refresh access tokens (optional).
+            refresh_client_secret: OAuth2 client secret used to refresh access tokens (optional).
         """
         self.token = token
+        self._refresh_client_id = refresh_client_id
+        self._refresh_client_secret = refresh_client_secret
         self._user_id: str | None = None
         self._request_count: int = 0
-        self._x_client = XdkClient(
-            access_token=token.access_token,
-        )
+        self._x_client = XdkClient(access_token=token.access_token)
+
+        # Best-effort early refresh if token is already expired.
+        self._ensure_fresh_token()
 
     @property
     def request_count(self) -> int:
@@ -101,6 +112,35 @@ class XClient:
         """Close the underlying XDK session."""
         self._x_client.session.close()
 
+    def _ensure_fresh_token(self) -> None:
+        """Refresh the access token if expired and refresh is configured."""
+        if not self.token.is_expired():
+            return
+        if not self.token.refresh_token:
+            return
+        if not self._refresh_client_id:
+            logger.warning(
+                "Token expired but refresh client_id is missing; cannot refresh automatically"
+            )
+            return
+
+        try:
+            refreshed = refresh_access_token(
+                self.token.refresh_token,
+                self._refresh_client_id,
+                self._refresh_client_secret,
+            )
+        except Exception as e:
+            logger.warning("Automatic token refresh failed", error=str(e))
+            return
+
+        # Swap token + underlying client so future calls use the fresh access token.
+        self.token = refreshed
+        with contextlib.suppress(Exception):
+            self._x_client.session.close()
+        self._x_client = XdkClient(access_token=self.token.access_token)
+        logger.info("Access token refreshed for XDK client")
+
     def get_authenticated_user_id(self) -> str:
         """Get the authenticated user's ID.
 
@@ -110,6 +150,7 @@ class XClient:
         if self._user_id is not None:
             return self._user_id
 
+        self._ensure_fresh_token()
         self._request_count += 1
         response = self._x_client.users.get_me()
         self._user_id = self._extract_id_from_me_response(response)
@@ -138,6 +179,7 @@ class XClient:
             BookmarkItem for each bookmark.
 
         """
+        self._ensure_fresh_token()
         user_id = self.get_authenticated_user_id()
         total_fetched = 0
         page_count = 0
@@ -320,6 +362,7 @@ class XClient:
         Returns:
             True if successful.
         """
+        self._ensure_fresh_token()
         user_id = self.get_authenticated_user_id()
         self._request_count += 1
 
