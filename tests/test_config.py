@@ -76,6 +76,7 @@ class TestCreateDefaultConfig:
         # X section has empty placeholders for both auth methods
         assert "access_token" in content
         assert "client_id" in content
+        assert "skip_existing_links" in content
         # Raindrop still has placeholder
         assert "YOUR_RAINDROP_TOKEN" in content
 
@@ -152,6 +153,7 @@ class TestSyncSettings:
         assert settings.collection_id is None
         assert settings.tags == []
         assert settings.remove_from_x is False
+        assert settings.skip_existing_links is True
         assert settings.link_mode == LinkMode.PERMALINK
         assert settings.both_behavior == BothBehavior.ONE_EXTERNAL_PLUS_NOTE
         assert settings.dry_run is False
@@ -181,6 +183,7 @@ class TestSyncSettings:
         monkeypatch.setenv("SYNC_COLLECTION_ID", "12345")
         monkeypatch.setenv("SYNC_TAGS", '["auto", "synced"]')  # JSON format for list
         monkeypatch.setenv("SYNC_REMOVE_FROM_X", "true")
+        monkeypatch.setenv("SYNC_SKIP_EXISTING_LINKS", "false")
         monkeypatch.setenv("SYNC_LINK_MODE", "first_external_url")
 
         settings = SyncSettings()
@@ -188,6 +191,7 @@ class TestSyncSettings:
         assert settings.collection_id == 12345
         assert settings.tags == ["auto", "synced"]
         assert settings.remove_from_x is True
+        assert settings.skip_existing_links is False
         assert settings.link_mode == LinkMode.FIRST_EXTERNAL_URL
 
     def test_link_mode_enum_values(self) -> None:

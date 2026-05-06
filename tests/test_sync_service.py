@@ -383,6 +383,56 @@ class TestSyncService:
         assert result.newly_synced == 0
         assert len(mock_raindrop_client.created_raindrops) == 0
 
+    def test_sync_skips_links_that_already_exist_in_raindrop(
+        self,
+        mock_x_client: MockXClient,
+        in_memory_state: InMemoryState,
+        sync_settings: SyncSettings,
+    ) -> None:
+        """Test skipping bookmarks whose links already exist in Raindrop."""
+        existing_link = "https://x.com/user2/status/2222222222"
+        raindrop_client = MockRaindropClient(existing_links=[existing_link])
+        service = SyncService(
+            x_client=mock_x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=sync_settings,
+        )
+
+        result = service.sync()
+
+        assert result.total_bookmarks == 3
+        assert result.newly_synced == 2
+        assert result.already_synced == 1
+        created_links = [request.link for request in raindrop_client.created_raindrops]
+        assert existing_link not in created_links
+        assert in_memory_state.is_synced("2222222222")
+
+    def test_sync_can_disable_existing_link_check(
+        self,
+        mock_x_client: MockXClient,
+        in_memory_state: InMemoryState,
+        sync_settings: SyncSettings,
+    ) -> None:
+        """Test existing-link check can be disabled."""
+        sync_settings.skip_existing_links = False
+        existing_link = "https://x.com/user2/status/2222222222"
+        raindrop_client = MockRaindropClient(existing_links=[existing_link])
+        service = SyncService(
+            x_client=mock_x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=sync_settings,
+        )
+
+        result = service.sync()
+
+        assert result.total_bookmarks == 3
+        assert result.newly_synced == 3
+        assert result.already_synced == 0
+        created_links = [request.link for request in raindrop_client.created_raindrops]
+        assert existing_link in created_links
+
 
 class TestSyncServiceIntegration:
     """Integration-style tests for complete sync flows."""

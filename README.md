@@ -142,6 +142,7 @@ export RAINDROP_TOKEN="your_raindrop_token"
 export SYNC_COLLECTION_ID="12345"  # Target collection ID
 export SYNC_TAGS='["x-bookmark", "auto-synced"]'  # JSON array format
 export SYNC_REMOVE_FROM_X="false"
+export SYNC_SKIP_EXISTING_LINKS="true"  # Skip links already saved in Raindrop
 export SYNC_LINK_MODE="permalink"  # permalink, first_external_url, or both
 ```
 
@@ -238,6 +239,7 @@ collection_id = 12345
 collection_title = ""  # Optional: look up collection by title
 tags = ["x-bookmark", "auto-synced"]
 remove_from_x = false
+skip_existing_links = true
 link_mode = "permalink"  # permalink, first_external_url, or both
 both_behavior = "one_external_plus_note"  # one_external_plus_note or two_raindrops
 dry_run = false

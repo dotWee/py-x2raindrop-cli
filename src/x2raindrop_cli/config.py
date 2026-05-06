@@ -161,6 +161,7 @@ class SyncSettings(BaseSettings):
         collection_title: Optional collection title (for lookup).
         tags: Tags to apply to created Raindrops.
         remove_from_x: Whether to remove from X after syncing.
+        skip_existing_links: Whether to skip links that already exist in Raindrop.
         link_mode: How to determine the Raindrop link.
         both_behavior: Behavior when link_mode is 'both'.
         state_path: Path to the sync state file.
@@ -177,6 +178,10 @@ class SyncSettings(BaseSettings):
     collection_title: str | None = Field(None, description="Collection title for lookup")
     tags: list[str] = Field(default_factory=list, description="Tags to apply")
     remove_from_x: bool = Field(False, description="Remove from X after sync")
+    skip_existing_links: bool = Field(
+        True,
+        description="Skip links that already exist in target Raindrop collection",
+    )
     link_mode: LinkMode = Field(LinkMode.PERMALINK, description="Link resolution mode")
     both_behavior: BothBehavior = Field(
         BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
@@ -333,6 +338,7 @@ def create_default_config(path: Path | None = None) -> Path:
             "collection_title": "",
             "tags": ["x-bookmark", "auto-synced"],
             "remove_from_x": False,
+            "skip_existing_links": True,
             "link_mode": "permalink",
             "both_behavior": "one_external_plus_note",
             "dry_run": False,
