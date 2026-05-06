@@ -82,6 +82,8 @@ If you already have an access token (e.g., from another OAuth flow or the X Deve
 ```toml
 [x]
 access_token = "your_access_token_here"
+# Optional: provide refresh_token to enable automatic token refresh
+refresh_token = "your_refresh_token_here"
 ```
 
 #### Option B: OAuth 2.0 PKCE Flow (Interactive)

@@ -6,6 +6,7 @@ Rich for beautiful terminal output.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -100,7 +101,18 @@ def _get_x_token(settings: Settings) -> OAuth2Token | None:
     if settings.x.has_direct_token():
         direct_token = settings.x.get_direct_token()
         if direct_token:
-            logger.debug("Using direct access token")
+            logger.debug("Using direct token from config/env")
+            if settings.x.access_token and settings.x.refresh_token:
+                # Allow pairing a refresh token with a direct access token.
+                # The access token will be refreshed automatically by XClient when needed.
+                return OAuth2Token(
+                    access_token=settings.x.access_token,
+                    refresh_token=settings.x.refresh_token,
+                    token_type="bearer",
+                    # Mark expired so refresh happens on first request when configured.
+                    expires_at=datetime.now(),
+                    scope="",
+                )
             return OAuth2Token.from_access_token(direct_token)
 
     # Fall back to PKCE flow if client_id is configured
@@ -262,7 +274,11 @@ def sync(
         console.print()
 
         # Initialize clients
-        x_client = XClient(token)
+        x_client = XClient(
+            token,
+            refresh_client_id=settings.x.client_id,
+            refresh_client_secret=settings.x.client_secret,
+        )
         raindrop_client = RaindropClient(settings.raindrop.token)
         state = SyncState(settings.sync.state_path)
 

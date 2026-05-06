@@ -104,6 +104,18 @@ class TestXSettings:
         assert settings.get_direct_token() == "test_access_token"
         assert settings.can_use_pkce_flow() is False
 
+    def test_direct_access_token_with_refresh_token(self, monkeypatch: MonkeyPatch) -> None:
+        """Test direct access token can include refresh token."""
+        monkeypatch.setenv("X_ACCESS_TOKEN", "test_access_token")
+        monkeypatch.setenv("X_REFRESH_TOKEN", "test_refresh_token")
+
+        settings = XSettings()
+
+        assert settings.access_token == "test_access_token"
+        assert settings.refresh_token == "test_refresh_token"
+        assert settings.has_direct_token() is True
+        assert settings.get_direct_token() == "test_access_token"
+
     def test_pkce_flow_with_client_id(self, monkeypatch: MonkeyPatch) -> None:
         """Test PKCE flow requires client_id."""
         monkeypatch.setenv("X_CLIENT_ID", "test_id")
