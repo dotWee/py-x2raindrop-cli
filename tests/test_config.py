@@ -8,7 +8,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from x2raindrop_cli.config import (
+    SourceSyncSettings,
     SyncSettings,
     XSettings,
     create_default_config,
@@ -65,6 +68,8 @@ class TestCreateDefaultConfig:
         assert "[x]" in content
         assert "[raindrop]" in content
         assert "[sync]" in content
+        assert "[sync.bookmarks]" in content
+        assert "[sync.likes]" in content
 
     def test_config_contains_placeholder_values(self, temp_dir: Path) -> None:
         """Test that config contains placeholder values."""
@@ -73,11 +78,10 @@ class TestCreateDefaultConfig:
 
         content = config_path.read_text()
 
-        # X section has empty placeholders for both auth methods
         assert "access_token" in content
         assert "client_id" in content
         assert "skip_existing_links" in content
-        # Raindrop still has placeholder
+        assert "like.read" in content
         assert "YOUR_RAINDROP_TOKEN" in content
 
 
@@ -139,8 +143,32 @@ class TestXSettings:
 
         assert "bookmark.read" in settings.scopes
         assert "bookmark.write" in settings.scopes
+        assert "like.read" in settings.scopes
+        assert "like.write" in settings.scopes
         assert "tweet.read" in settings.scopes
         assert "users.read" in settings.scopes
+
+
+class TestSourceSyncSettings:
+    """Tests for per-source sync settings."""
+
+    def test_default_values(self) -> None:
+        """Test default values for source sync settings."""
+        settings = SourceSyncSettings()
+
+        assert settings.enabled is True
+        assert settings.collection_id is None
+        assert settings.tags == []
+        assert settings.remove_from_x is False
+        assert settings.skip_existing_links is True
+        assert settings.link_mode == LinkMode.PERMALINK
+        assert settings.both_behavior == BothBehavior.ONE_EXTERNAL_PLUS_NOTE
+
+    def test_parse_tags_from_string(self) -> None:
+        """Test parsing tags from comma-separated string."""
+        settings = SourceSyncSettings(tags="tag1, tag2, tag3")
+
+        assert settings.tags == ["tag1", "tag2", "tag3"]
 
 
 class TestSyncSettings:
@@ -150,65 +178,74 @@ class TestSyncSettings:
         """Test default values for sync settings."""
         settings = SyncSettings()
 
-        assert settings.collection_id is None
-        assert settings.tags == []
-        assert settings.remove_from_x is False
-        assert settings.skip_existing_links is True
-        assert settings.link_mode == LinkMode.PERMALINK
-        assert settings.both_behavior == BothBehavior.ONE_EXTERNAL_PLUS_NOTE
+        assert settings.bookmarks.enabled is True
+        assert settings.likes.enabled is False
+        assert settings.bookmarks.collection_id is None
+        assert settings.bookmarks.tags == ["x-bookmark", "auto-synced"]
+        assert settings.likes.tags == ["x-like", "auto-synced"]
         assert settings.dry_run is False
 
-    def test_parse_tags_from_string(self) -> None:
-        """Test parsing tags from comma-separated string."""
-        settings = SyncSettings(tags="tag1, tag2, tag3")
+    def test_migrates_legacy_flat_config(self) -> None:
+        """Test legacy flat sync config is migrated to bookmarks."""
+        settings = SyncSettings(
+            collection_id=12345,
+            tags=["legacy"],
+            remove_from_x=True,
+            link_mode="first_external_url",
+        )
 
-        assert settings.tags == ["tag1", "tag2", "tag3"]
+        assert settings.bookmarks.collection_id == 12345
+        assert settings.bookmarks.tags == ["legacy"]
+        assert settings.bookmarks.remove_from_x is True
+        assert settings.bookmarks.link_mode == LinkMode.FIRST_EXTERNAL_URL
 
-    def test_parse_tags_from_list(self) -> None:
-        """Test parsing tags from list."""
-        settings = SyncSettings(tags=["tag1", "tag2"])
-
-        assert settings.tags == ["tag1", "tag2"]
-
-    def test_parse_empty_tags(self) -> None:
-        """Test parsing empty tags."""
-        settings = SyncSettings(tags="")
-        assert settings.tags == []
-
-        settings2 = SyncSettings(tags=None)
-        assert settings2.tags == []
-
-    def test_loads_from_env(self, monkeypatch: MonkeyPatch) -> None:
-        """Test loading sync settings from environment."""
-        monkeypatch.setenv("SYNC_COLLECTION_ID", "12345")
-        monkeypatch.setenv("SYNC_TAGS", '["auto", "synced"]')  # JSON format for list
-        monkeypatch.setenv("SYNC_REMOVE_FROM_X", "true")
-        monkeypatch.setenv("SYNC_SKIP_EXISTING_LINKS", "false")
-        monkeypatch.setenv("SYNC_LINK_MODE", "first_external_url")
+    def test_loads_nested_env(self, monkeypatch: MonkeyPatch) -> None:
+        """Test loading nested sync settings from environment."""
+        monkeypatch.setenv("SYNC_BOOKMARKS__COLLECTION_ID", "12345")
+        monkeypatch.setenv("SYNC_LIKES__ENABLED", "true")
+        monkeypatch.setenv("SYNC_LIKES__COLLECTION_ID", "67890")
 
         settings = SyncSettings()
 
-        assert settings.collection_id == 12345
-        assert settings.tags == ["auto", "synced"]
-        assert settings.remove_from_x is True
-        assert settings.skip_existing_links is False
-        assert settings.link_mode == LinkMode.FIRST_EXTERNAL_URL
+        assert settings.bookmarks.collection_id == 12345
+        assert settings.likes.enabled is True
+        assert settings.likes.collection_id == 67890
 
-    def test_link_mode_enum_values(self) -> None:
-        """Test setting link_mode with enum values."""
-        settings1 = SyncSettings(link_mode=LinkMode.PERMALINK)
-        assert settings1.link_mode == LinkMode.PERMALINK
+    def test_validate_enabled_sources_requires_collection(self) -> None:
+        """Test validation fails when enabled source lacks collection ID."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(enabled=True, collection_id=None),
+            likes=SourceSyncSettings(enabled=False),
+        )
 
-        settings2 = SyncSettings(link_mode=LinkMode.FIRST_EXTERNAL_URL)
-        assert settings2.link_mode == LinkMode.FIRST_EXTERNAL_URL
+        with pytest.raises(ValueError, match="bookmarks.collection_id"):
+            settings.validate_enabled_sources()
 
-        settings3 = SyncSettings(link_mode=LinkMode.BOTH)
-        assert settings3.link_mode == LinkMode.BOTH
+    def test_validate_enabled_sources_rejects_system_all_collection(self) -> None:
+        """Test validation rejects Raindrop collection 0 (All)."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(enabled=True, collection_id=0),
+            likes=SourceSyncSettings(enabled=False),
+        )
 
-    def test_both_behavior_enum_values(self) -> None:
-        """Test setting both_behavior with enum values."""
-        settings1 = SyncSettings(both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE)
-        assert settings1.both_behavior == BothBehavior.ONE_EXTERNAL_PLUS_NOTE
+        with pytest.raises(ValueError, match="bookmarks.collection_id"):
+            settings.validate_enabled_sources()
 
-        settings2 = SyncSettings(both_behavior=BothBehavior.TWO_RAINDROPS)
-        assert settings2.both_behavior == BothBehavior.TWO_RAINDROPS
+    def test_validate_enabled_sources_allows_unsorted(self) -> None:
+        """Test validation allows Raindrop Unsorted collection (-1)."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(enabled=True, collection_id=-1),
+            likes=SourceSyncSettings(enabled=False),
+        )
+
+        settings.validate_enabled_sources()
+
+    def test_validate_enabled_sources_requires_one_source(self) -> None:
+        """Test validation fails when no sources are enabled."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(enabled=False),
+            likes=SourceSyncSettings(enabled=False),
+        )
+
+        with pytest.raises(ValueError, match="At least one sync source"):
+            settings.validate_enabled_sources()

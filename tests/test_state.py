@@ -78,28 +78,64 @@ class TestSyncState:
 
     def test_save_and_load(self, temp_dir: Path) -> None:
         """Test saving and loading state."""
+        from x2raindrop_cli.models import PostSource
+
         state_path = temp_dir / "state.json"
         state = SyncState(state_path)
 
-        state.mark_synced("tweet1", ["https://link1.com"], False)
-        state.mark_synced("tweet2", ["https://link2.com"], True)
+        state.mark_synced("tweet1", ["https://link1.com"], False, source=PostSource.BOOKMARKS)
+        state.mark_synced("tweet2", ["https://link2.com"], True, source=PostSource.LIKES)
         state.save()
 
-        # Create new state and load
         state2 = SyncState(state_path)
         state2.load()
 
-        assert state2.is_synced("tweet1")
-        assert state2.is_synced("tweet2")
+        assert state2.is_synced("tweet1", source=PostSource.BOOKMARKS)
+        assert state2.is_synced("tweet2", source=PostSource.LIKES)
 
-        record1 = state2.get_synced("tweet1")
+        record1 = state2.get_synced("tweet1", source=PostSource.BOOKMARKS)
         assert record1 is not None
         assert record1.raindrop_links == ["https://link1.com"]
         assert record1.deleted_from_x is False
 
-        record2 = state2.get_synced("tweet2")
+        record2 = state2.get_synced("tweet2", source=PostSource.LIKES)
         assert record2 is not None
         assert record2.deleted_from_x is True
+
+    def test_load_legacy_v1_state(self, temp_dir: Path) -> None:
+        """Test loading legacy v1 state migrates bookmarks."""
+        state_path = temp_dir / "state.json"
+        state_path.write_text(
+            """{
+  "version": 1,
+  "synced": {
+    "12345": {
+      "tweet_id": "12345",
+      "raindrop_links": ["https://example.com"],
+      "synced_at": "2024-01-01T00:00:00",
+      "deleted_from_x": false
+    }
+  }
+}"""
+        )
+
+        state = SyncState(state_path)
+        state.load()
+
+        assert state.is_synced("12345")
+        record = state.get_synced("12345")
+        assert record is not None
+        assert record.raindrop_links == ["https://example.com"]
+
+        # Legacy load marks dirty so the next save upgrades to v2 layout.
+        state.save()
+        reloaded = SyncState(state_path)
+        reloaded.load()
+        assert reloaded.is_synced("12345")
+        saved = state_path.read_text()
+        assert '"version": 2' in saved
+        assert '"bookmarks"' in saved
+        assert '"synced"' not in saved
 
     def test_save_creates_parent_dirs(self, temp_dir: Path) -> None:
         """Test that save creates parent directories."""

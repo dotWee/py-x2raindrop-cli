@@ -52,7 +52,7 @@ logger = structlog.get_logger(__name__)
 # Create Typer app
 app = typer.Typer(
     name="x2raindrop",
-    help="Sync X (Twitter) Bookmarks to Raindrop.io",
+    help="Sync X (Twitter) bookmarks and likes to Raindrop.io",
     no_args_is_help=True,
 )
 
@@ -165,11 +165,32 @@ def sync(
             dir_okay=False,
         ),
     ] = None,
+    bookmarks: Annotated[
+        bool | None,
+        typer.Option(
+            "--bookmarks/--no-bookmarks",
+            help="Sync X bookmarks (overrides config)",
+        ),
+    ] = None,
+    likes: Annotated[
+        bool | None,
+        typer.Option(
+            "--likes/--no-likes",
+            help="Sync X liked posts (overrides config)",
+        ),
+    ] = None,
     collection_id: Annotated[
         int | None,
         typer.Option(
             "--collection",
-            help="Target Raindrop collection ID",
+            help="Target Raindrop collection ID for bookmarks",
+        ),
+    ] = None,
+    likes_collection_id: Annotated[
+        int | None,
+        typer.Option(
+            "--likes-collection",
+            help="Target Raindrop collection ID for liked posts",
         ),
     ] = None,
     tags: Annotated[
@@ -177,21 +198,21 @@ def sync(
         typer.Option(
             "--tags",
             "-t",
-            help="Comma-separated tags to apply",
+            help="Comma-separated tags to apply to bookmarks",
         ),
     ] = None,
     remove_from_x: Annotated[
         bool,
         typer.Option(
             "--remove-from-x/--no-remove-from-x",
-            help="Remove bookmarks from X after syncing",
+            help="Remove synced items from X after syncing (unbookmark/unlike)",
         ),
     ] = False,
     skip_existing_links: Annotated[
         bool | None,
         typer.Option(
             "--skip-existing-links/--no-skip-existing-links",
-            help="Skip links already present in Raindrop",
+            help="Skip links already present in the target Raindrop collection",
         ),
     ] = None,
     link_mode: Annotated[
@@ -199,7 +220,7 @@ def sync(
         typer.Option(
             "--link-mode",
             "-l",
-            help="Link resolution mode",
+            help="Link resolution mode for enabled sources",
         ),
     ] = None,
     dry_run: Annotated[
@@ -211,37 +232,50 @@ def sync(
         ),
     ] = False,
 ) -> None:
-    """Sync X bookmarks to Raindrop.io.
+    """Sync X bookmarks and/or likes to Raindrop.io.
 
-    Fetches your X bookmarks and creates corresponding Raindrop.io
-    bookmarks in the configured collection.
+    Fetches your X bookmarks and/or liked posts and creates corresponding
+    Raindrop.io bookmarks in the configured collections.
     """
     try:
-        # Load settings
         settings = load_settings(config_path)
 
-        # Override settings from CLI flags
+        if bookmarks is not None:
+            settings.sync.bookmarks.enabled = bookmarks
+        if likes is not None:
+            settings.sync.likes.enabled = likes
         if collection_id is not None:
-            settings.sync.collection_id = collection_id
+            settings.sync.bookmarks.collection_id = collection_id
+        if likes_collection_id is not None:
+            settings.sync.likes.collection_id = likes_collection_id
+            # Enabling a likes collection implies likes sync unless explicitly disabled.
+            if likes is None:
+                settings.sync.likes.enabled = True
         if tags is not None:
-            settings.sync.tags = [t.strip() for t in tags.split(",") if t.strip()]
+            settings.sync.bookmarks.tags = [t.strip() for t in tags.split(",") if t.strip()]
         if remove_from_x:
-            settings.sync.remove_from_x = True
+            if settings.sync.bookmarks.enabled:
+                settings.sync.bookmarks.remove_from_x = True
+            if settings.sync.likes.enabled:
+                settings.sync.likes.remove_from_x = True
         if skip_existing_links is not None:
-            settings.sync.skip_existing_links = skip_existing_links
+            if settings.sync.bookmarks.enabled:
+                settings.sync.bookmarks.skip_existing_links = skip_existing_links
+            if settings.sync.likes.enabled:
+                settings.sync.likes.skip_existing_links = skip_existing_links
         if link_mode is not None:
-            settings.sync.link_mode = link_mode
+            if settings.sync.bookmarks.enabled:
+                settings.sync.bookmarks.link_mode = link_mode
+            if settings.sync.likes.enabled:
+                settings.sync.likes.link_mode = link_mode
         if dry_run:
             settings.sync.dry_run = True
 
-        # Validate collection ID
-        if settings.sync.collection_id is None:
-            console.print(
-                "[red]Error:[/red] No collection ID specified. "
-                "Use --collection or set SYNC_COLLECTION_ID.",
-                style="bold",
-            )
-            raise typer.Exit(1)
+        try:
+            settings.sync.validate_enabled_sources()
+        except ValueError as error:
+            console.print(f"[red]Error:[/red] {error}", style="bold")
+            raise typer.Exit(1) from None
 
         # Get X authentication token
         token = _get_x_token(settings)
@@ -259,30 +293,54 @@ def sync(
                 )
             raise typer.Exit(1)
 
-        # Show sync configuration
         if settings.sync.dry_run:
             console.print("[yellow]DRY RUN MODE - No changes will be made[/yellow]\n")
 
-        # Rate limit warning for remove_from_x
-        if settings.sync.remove_from_x:
+        if settings.sync.bookmarks.enabled and settings.sync.bookmarks.remove_from_x:
             console.print(
-                "[yellow bold]WARNING:[/yellow bold] --remove-from-x is enabled.\n"
+                "[yellow bold]WARNING:[/yellow bold] Bookmark remove-from-x is enabled.\n"
                 "Each bookmark deletion requires a separate X API request.\n"
                 "X API Free Tier only allows 1 request per 15 minutes!\n"
-                "Consider using --no-remove-from-x to avoid rate limits.\n"
+                "Consider disabling remove_from_x to avoid rate limits.\n"
+            )
+
+        if settings.sync.likes.enabled and settings.sync.likes.remove_from_x:
+            console.print(
+                "[yellow bold]WARNING:[/yellow bold] Like remove-from-x is enabled.\n"
+                "Each unlike requires a separate X API request.\n"
+                "X API Free Tier only allows 1 request per 15 minutes!\n"
+                "Consider disabling remove_from_x to avoid rate limits.\n"
             )
 
         table = Table(title="Sync Configuration", show_header=False)
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="green")
-        table.add_row("Collection ID", str(settings.sync.collection_id))
-        table.add_row("Tags", ", ".join(settings.sync.tags) or "(none)")
-        table.add_row("Link Mode", settings.sync.link_mode.value)
-        table.add_row("Remove from X", "Yes" if settings.sync.remove_from_x else "No")
-        table.add_row(
-            "Skip Existing Links",
-            "Yes" if settings.sync.skip_existing_links else "No",
-        )
+        table.add_row("Bookmarks Enabled", "Yes" if settings.sync.bookmarks.enabled else "No")
+        if settings.sync.bookmarks.enabled:
+            table.add_row("Bookmarks Collection ID", str(settings.sync.bookmarks.collection_id))
+            table.add_row("Bookmarks Tags", ", ".join(settings.sync.bookmarks.tags) or "(none)")
+            table.add_row("Bookmarks Link Mode", settings.sync.bookmarks.link_mode.value)
+            table.add_row(
+                "Bookmarks Remove from X",
+                "Yes" if settings.sync.bookmarks.remove_from_x else "No",
+            )
+            table.add_row(
+                "Bookmarks Skip Existing Links",
+                "Yes" if settings.sync.bookmarks.skip_existing_links else "No",
+            )
+        table.add_row("Likes Enabled", "Yes" if settings.sync.likes.enabled else "No")
+        if settings.sync.likes.enabled:
+            table.add_row("Likes Collection ID", str(settings.sync.likes.collection_id))
+            table.add_row("Likes Tags", ", ".join(settings.sync.likes.tags) or "(none)")
+            table.add_row("Likes Link Mode", settings.sync.likes.link_mode.value)
+            table.add_row(
+                "Likes Remove from X",
+                "Yes" if settings.sync.likes.remove_from_x else "No",
+            )
+            table.add_row(
+                "Likes Skip Existing Links",
+                "Yes" if settings.sync.likes.skip_existing_links else "No",
+            )
         console.print(table)
         console.print()
 
@@ -311,7 +369,7 @@ def sync(
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             console=console,
         ) as progress:
-            task: TaskID = progress.add_task("Syncing bookmarks...", total=None)
+            task: TaskID = progress.add_task("Syncing...", total=None)
 
             def update_progress(current: int, total: int, message: str) -> None:
                 progress.update(task, total=total, completed=current, description=message)
@@ -319,7 +377,12 @@ def sync(
             result = service.sync(progress_callback=update_progress)
 
         # Show results
-        _display_sync_result(result, x_client.request_count)
+        _display_sync_result(
+            result,
+            x_client.request_count,
+            bookmarks_enabled=settings.sync.bookmarks.enabled,
+            likes_enabled=settings.sync.likes.enabled,
+        )
 
         # Cleanup
         x_client.close()
@@ -331,30 +394,44 @@ def sync(
         raise typer.Exit(1) from None
 
 
-def _display_sync_result(result: SyncResult, x_api_requests: int = 0) -> None:
+def _display_sync_result(
+    result: SyncResult,
+    x_api_requests: int = 0,
+    *,
+    bookmarks_enabled: bool = True,
+    likes_enabled: bool = False,
+) -> None:
     """Display sync results in a nice table.
 
     Args:
         result: Sync result with statistics.
         x_api_requests: Number of X API requests made.
+        bookmarks_enabled: Whether bookmark sync was enabled.
+        likes_enabled: Whether like sync was enabled.
     """
-    table = Table(title="Sync Results")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Count", style="green", justify="right")
+    sections = []
+    if bookmarks_enabled:
+        sections.append(("Bookmarks", result.bookmarks))
+    if likes_enabled:
+        sections.append(("Likes", result.likes))
 
-    table.add_row("Total Bookmarks", str(result.total_bookmarks))
-    table.add_row("Newly Synced", str(result.newly_synced))
-    table.add_row("Already Synced", str(result.already_synced))
-    table.add_row("Failed", str(result.failed))
-    table.add_row("Deleted from X", str(result.deleted_from_x))
-    table.add_row("X API Requests", str(x_api_requests))
+    for source_name, source_result in sections:
+        table = Table(title=f"Sync Results ({source_name})")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Count", style="green", justify="right")
 
-    console.print(table)
+        table.add_row("Total Fetched", str(source_result.total))
+        table.add_row("Newly Synced", str(source_result.newly_synced))
+        table.add_row("Already Synced", str(source_result.already_synced))
+        table.add_row("Failed", str(source_result.failed))
+        table.add_row("Removed from X", str(source_result.removed_from_x))
 
-    # Rate limit info
+        console.print(table)
+        console.print()
+
     if x_api_requests > 0:
         console.print(
-            f"\n[dim]X API requests made: {x_api_requests} "
+            f"[dim]X API requests made: {x_api_requests} "
             "(Free Tier limit: 1 request per 15 min)[/dim]"
         )
 
@@ -664,15 +741,36 @@ def config_show(
         table.add_row("Raindrop Token", "***" if settings.raindrop.token else "(not set)")
 
         # Sync settings
+        table.add_row("Bookmarks Enabled", str(settings.sync.bookmarks.enabled))
         table.add_row(
-            "Collection ID",
-            str(settings.sync.collection_id) if settings.sync.collection_id else "(not set)",
+            "Bookmarks Collection ID",
+            str(settings.sync.bookmarks.collection_id)
+            if settings.sync.bookmarks.collection_id
+            else "(not set)",
         )
-        table.add_row("Tags", ", ".join(settings.sync.tags) or "(none)")
-        table.add_row("Remove from X", str(settings.sync.remove_from_x))
-        table.add_row("Skip Existing Links", str(settings.sync.skip_existing_links))
-        table.add_row("Link Mode", settings.sync.link_mode.value)
-        table.add_row("Both Behavior", settings.sync.both_behavior.value)
+        table.add_row("Bookmarks Tags", ", ".join(settings.sync.bookmarks.tags) or "(none)")
+        table.add_row("Bookmarks Remove from X", str(settings.sync.bookmarks.remove_from_x))
+        table.add_row(
+            "Bookmarks Skip Existing Links",
+            str(settings.sync.bookmarks.skip_existing_links),
+        )
+        table.add_row("Bookmarks Link Mode", settings.sync.bookmarks.link_mode.value)
+        table.add_row("Bookmarks Both Behavior", settings.sync.bookmarks.both_behavior.value)
+        table.add_row("Likes Enabled", str(settings.sync.likes.enabled))
+        table.add_row(
+            "Likes Collection ID",
+            str(settings.sync.likes.collection_id)
+            if settings.sync.likes.collection_id
+            else "(not set)",
+        )
+        table.add_row("Likes Tags", ", ".join(settings.sync.likes.tags) or "(none)")
+        table.add_row("Likes Remove from X", str(settings.sync.likes.remove_from_x))
+        table.add_row(
+            "Likes Skip Existing Links",
+            str(settings.sync.likes.skip_existing_links),
+        )
+        table.add_row("Likes Link Mode", settings.sync.likes.link_mode.value)
+        table.add_row("Likes Both Behavior", settings.sync.likes.both_behavior.value)
         table.add_row("State Path", str(settings.sync.state_path))
 
         console.print(table)

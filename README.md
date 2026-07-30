@@ -138,12 +138,17 @@ export X_CLIENT_SECRET="your_client_secret"  # Optional for public clients
 # Raindrop.io credentials
 export RAINDROP_TOKEN="your_raindrop_token"
 
-# Sync settings
-export SYNC_COLLECTION_ID="12345"  # Target collection ID
-export SYNC_TAGS='["x-bookmark", "auto-synced"]'  # JSON array format
-export SYNC_REMOVE_FROM_X="false"
-export SYNC_SKIP_EXISTING_LINKS="true"  # Skip links already saved in Raindrop
-export SYNC_LINK_MODE="permalink"  # permalink, first_external_url, or both
+# Sync settings (nested per source; note single underscore after SYNC_)
+export SYNC_BOOKMARKS__COLLECTION_ID="12345"
+export SYNC_BOOKMARKS__TAGS='["x-bookmark", "auto-synced"]'
+export SYNC_BOOKMARKS__REMOVE_FROM_X="false"
+export SYNC_BOOKMARKS__SKIP_EXISTING_LINKS="true"
+export SYNC_BOOKMARKS__LINK_MODE="permalink"
+
+# Optional: enable liked-post sync
+export SYNC_LIKES__ENABLED="true"
+export SYNC_LIKES__COLLECTION_ID="54321"
+export SYNC_LIKES__TAGS='["x-like", "auto-synced"]'
 ```
 
 ## Usage
@@ -166,25 +171,39 @@ Find the collection ID you want to sync to:
 uv run x2raindrop raindrop collections
 ```
 
-### Sync Bookmarks
+### Sync Bookmarks and Likes
 
-Basic sync:
+Basic bookmark sync:
 
 ```bash
 uv run x2raindrop sync --collection 12345
 ```
 
+Sync liked posts only:
+
+```bash
+uv run x2raindrop sync --no-bookmarks --likes --likes-collection 54321
+```
+
+Sync both bookmarks and likes (each to its own Raindrop collection):
+
+```bash
+uv run x2raindrop sync --collection 12345 --likes --likes-collection 54321
+```
+
+> Passing `--likes-collection` also enables likes sync unless `--no-likes` is set.
+
 With options:
 
 ```bash
-# Sync with custom tags
+# Sync bookmarks with custom tags
 uv run x2raindrop sync --collection 12345 --tags "x,bookmarks,auto"
 
-# Use first external URL from tweets
+# Use first external URL from tweets (applies to enabled sources)
 uv run x2raindrop sync --collection 12345 --link-mode first_external_url
 
-# Remove from X after syncing (use with caution!)
-uv run x2raindrop sync --collection 12345 --remove-from-x
+# Remove synced items from X after syncing (unbookmark and/or unlike)
+uv run x2raindrop sync --collection 12345 --likes --likes-collection 54321 --remove-from-x
 
 # Dry run - see what would happen without making changes
 uv run x2raindrop sync --collection 12345 --dry-run
@@ -226,6 +245,8 @@ redirect_uri = "http://127.0.0.1:8765/callback"
 scopes = [
     "bookmark.read",
     "bookmark.write",
+    "like.read",
+    "like.write",
     "tweet.read",
     "users.read",
     "offline.access",
@@ -235,6 +256,10 @@ scopes = [
 token = "YOUR_RAINDROP_TOKEN"
 
 [sync]
+dry_run = false
+
+[sync.bookmarks]
+enabled = true
 collection_id = 12345
 collection_title = ""  # Optional: look up collection by title
 tags = ["x-bookmark", "auto-synced"]
@@ -242,8 +267,23 @@ remove_from_x = false
 skip_existing_links = true
 link_mode = "permalink"  # permalink, first_external_url, or both
 both_behavior = "one_external_plus_note"  # one_external_plus_note or two_raindrops
-dry_run = false
+
+[sync.likes]
+enabled = false
+collection_id = 54321
+collection_title = ""
+tags = ["x-like", "auto-synced"]
+remove_from_x = false  # Unlike posts on X after syncing
+skip_existing_links = true
+link_mode = "permalink"
+both_behavior = "one_external_plus_note"
 ```
+
+Legacy flat `[sync]` settings (without `bookmarks` / `likes` sections) are still
+supported and are treated as bookmark settings for backward compatibility.
+
+Each source can be configured independently: different Raindrop collections,
+tags, link modes, and remove-from-X behavior.
 
 ### Link Modes
 
@@ -273,7 +313,7 @@ The tool stores data in the current working directory:
 ## Safety Notes
 
 1. **Dry Run First**: Always use `--dry-run` before syncing to preview changes
-2. **Remove from X**: The `--remove-from-x` flag permanently removes bookmarks from X. Use with caution and consider backing up first
+2. **Remove from X**: The `remove_from_x` setting permanently removes bookmarks or unlikes posts on X. Use with caution and consider backing up first
 3. **Token Security**: The `x_token.json` file contains sensitive tokens. Ensure proper file permissions
 
 ## X API Rate Limits
@@ -308,9 +348,6 @@ The Docker image provides a convenient way to run x2raindrop-cli without install
 ```bash
 # Latest version
 docker pull ghcr.io/dotwee/x2raindrop-cli:latest
-
-# Specific version
-docker pull ghcr.io/dotwee/x2raindrop-cli:1.0.3
 ```
 
 ### Running Commands

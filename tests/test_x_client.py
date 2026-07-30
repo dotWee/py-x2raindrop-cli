@@ -75,6 +75,60 @@ class TestMockXClient:
         assert "tweet_2" in client.deleted_tweet_ids
         assert "tweet_3" in client.deleted_tweet_ids
 
+    def test_unlike_post_tracks_unlike(self) -> None:
+        """Test unlike_post tracks the unlike."""
+        client = MockXClient()
+
+        result = client.unlike_post("tweet_123")
+
+        assert result is True
+        assert "tweet_123" in client.unliked_tweet_ids
+
+    def test_get_liked_posts_returns_configured(self, sample_bookmarks: list[BookmarkItem]) -> None:
+        """Test that get_liked_posts returns configured liked posts."""
+        client = MockXClient(liked_posts=sample_bookmarks)
+
+        liked = list(client.get_liked_posts())
+
+        assert len(liked) == 3
+        assert liked[0].tweet_id == "1111111111"
+
+
+class TestXClientParsing:
+    """Tests for XClient tweet parsing helpers."""
+
+    def test_parse_tweet_coerces_int_author_id(self) -> None:
+        """Test author lookup works when API returns integer IDs."""
+        from datetime import datetime, timedelta
+
+        from x2raindrop_cli.x.auth_pkce import OAuth2Token
+        from x2raindrop_cli.x.client import XClient
+
+        token = OAuth2Token(
+            access_token="test",
+            refresh_token=None,
+            token_type="bearer",
+            expires_at=datetime.now() + timedelta(hours=1),
+            scope="tweet.read",
+        )
+        client = XClient(token)
+        try:
+            bookmark = client._parse_tweet(
+                {
+                    "id": 12345,
+                    "text": "Hello world",
+                    "author_id": 99,
+                    "created_at": "2024-01-01T00:00:00.000Z",
+                },
+                {"99": {"username": "alice", "name": "Alice"}},
+            )
+        finally:
+            client.close()
+
+        assert bookmark.tweet_id == "12345"
+        assert bookmark.author_username == "alice"
+        assert bookmark.permalink == "https://x.com/alice/status/12345"
+
 
 class TestBookmarkItemParsing:
     """Tests for BookmarkItem creation and parsing logic."""
