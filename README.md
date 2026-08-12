@@ -1,6 +1,6 @@
 # x2raindrop-cli
 
-A Python CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
+A Python CLI tool to sync your X (Twitter) bookmarks and liked posts to Raindrop.io collections.
 
 [![PyPI version](https://badge.fury.io/py/x2raindrop-cli.svg)](https://badge.fury.io/py/x2raindrop-cli)
 [![Docker Image](https://ghcr-badge.egpl.dev/dotwee/x2raindrop-cli/latest_tag?trim=major&label=docker)](https://ghcr.io/dotwee/x2raindrop-cli)
@@ -9,14 +9,15 @@ A Python CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
 
 ## Features
 
-- Sync X bookmarks to a specified Raindrop.io collection
+- Sync X bookmarks and/or liked posts to Raindrop.io collections
+- Per-source configuration: separate collections, tags, link modes, and remove-from-X settings
 - Configurable link handling:
   - Use X post permalink
   - Use first external URL from the post (with fallback to permalink)
   - Both: create entries for external URLs with X permalink stored in notes
-- Apply custom tags to synced bookmarks
-- Optional: Remove bookmarks from X after syncing
-- Idempotent syncing with local state tracking
+- Apply custom tags to synced Raindrops
+- Optional: unbookmark and/or unlike on X after syncing
+- Idempotent syncing with local state tracking (bookmarks and likes tracked separately)
 - Dry-run mode for safe testing
 - Interactive OAuth 2.0 PKCE authentication flow for X
 
@@ -64,6 +65,10 @@ docker run --rm -v "$PWD":/data ghcr.io/dotwee/x2raindrop-cli config init
 
 # Sync bookmarks
 docker run --rm -v "$PWD":/data ghcr.io/dotwee/x2raindrop-cli sync --collection 12345
+
+# Sync bookmarks and likes
+docker run --rm -v "$PWD":/data ghcr.io/dotwee/x2raindrop-cli \
+  sync --collection 12345 --likes --likes-collection 54321
 ```
 
 See the [Docker Usage](#docker-usage) section for more details.
@@ -101,10 +106,15 @@ For browser-based login:
 
 **Required OAuth 2.0 Scopes:**
 - `bookmark.read` - Read your bookmarks
-- `bookmark.write` - Remove bookmarks (optional, only if using `--remove-from-x`)
+- `bookmark.write` - Remove bookmarks (optional, only if using `--remove-from-x` for bookmarks)
+- `like.read` - Read your liked posts (required for likes sync)
+- `like.write` - Unlike posts (optional, only if using `--remove-from-x` for likes)
 - `tweet.read` - Read tweet data
 - `users.read` - Read user profile data
 - `offline.access` - Refresh tokens for persistent access
+
+If you previously authenticated without `like.read` / `like.write`, run
+`x2raindrop x logout` then `x2raindrop x login` again so the new scopes are granted.
 
 ### 3. Set Up Raindrop.io API Token
 
@@ -196,18 +206,22 @@ uv run x2raindrop sync --collection 12345 --likes --likes-collection 54321
 With options:
 
 ```bash
-# Sync bookmarks with custom tags
+# Sync bookmarks with custom tags (--tags applies to bookmarks only;
+# configure likes tags under [sync.likes] in config.toml)
 uv run x2raindrop sync --collection 12345 --tags "x,bookmarks,auto"
 
-# Use first external URL from tweets (applies to enabled sources)
+# Use first external URL from tweets (applies to all enabled sources)
 uv run x2raindrop sync --collection 12345 --link-mode first_external_url
 
 # Remove synced items from X after syncing (unbookmark and/or unlike)
 uv run x2raindrop sync --collection 12345 --likes --likes-collection 54321 --remove-from-x
 
 # Dry run - see what would happen without making changes
-uv run x2raindrop sync --collection 12345 --dry-run
+uv run x2raindrop sync --collection 12345 --likes --likes-collection 54321 --dry-run
 ```
+
+Enable likes permanently in `config.toml` with `[sync.likes] enabled = true` and a
+`collection_id`, then plain `x2raindrop sync` will sync both sources.
 
 ### Check X Authentication Status
 
@@ -308,7 +322,7 @@ The tool stores data in the current working directory:
 
 - `config.toml` - Configuration file
 - `.x2raindrop/x_token.json` - X OAuth tokens (keep secure!)
-- `.x2raindrop/state.json` - Sync state for idempotency
+- `.x2raindrop/state.json` - Sync state for idempotency (bookmarks and likes tracked separately)
 
 ## Safety Notes
 
@@ -327,17 +341,19 @@ The tool stores data in the current working directory:
 
 **API Request Breakdown:**
 - Fetching bookmarks: 1 request per 100 bookmarks (paginated)
-- Deleting a bookmark: 1 request per bookmark
+- Fetching liked posts: 1 request per 100 likes (paginated)
+- Deleting a bookmark / unliking a post: 1 request per item
 
 **Rate Limit Behavior:**
 The CLI now uses the official Python XDK for X API calls. If X returns a 429
 rate-limit response, the command exits with the API error from the SDK.
 
 **Recommendations for Free Tier:**
-1. **Don't use `--remove-from-x`** - each deletion is a separate request
+1. **Don't use `--remove-from-x`** - each unbookmark/unlike is a separate request
 2. Wait for the current rate-limit window to reset, then rerun the command
-3. The tool tracks synced bookmarks locally, so interrupted syncs can resume
-4. Consider upgrading to Basic tier if you have many bookmarks
+3. The tool tracks synced bookmarks and likes locally, so interrupted syncs can resume
+4. Sync one source at a time on Free Tier if rate limits are tight
+5. Consider upgrading to Basic tier if you have many bookmarks or likes
 
 ## Docker Usage
 
@@ -363,6 +379,7 @@ x2raindrop --version
 x2raindrop config init
 x2raindrop raindrop collections
 x2raindrop sync --collection 12345 --dry-run
+x2raindrop sync --collection 12345 --likes --likes-collection 54321 --dry-run
 ```
 
 ### Using Environment Variables
@@ -373,7 +390,9 @@ Pass credentials via environment variables instead of a config file:
 docker run --rm \
   -e X_ACCESS_TOKEN="your_token" \
   -e RAINDROP_TOKEN="your_raindrop_token" \
-  -e SYNC_COLLECTION_ID="12345" \
+  -e SYNC_BOOKMARKS__COLLECTION_ID="12345" \
+  -e SYNC_LIKES__ENABLED="true" \
+  -e SYNC_LIKES__COLLECTION_ID="54321" \
   -v "$PWD":/data \
   ghcr.io/dotwee/x2raindrop-cli sync
 ```
@@ -406,7 +425,7 @@ The container stores data in `/data` (the working directory):
 |------|---------|
 | `config.toml` | Configuration file |
 | `.x2raindrop/x_token.json` | X OAuth tokens |
-| `.x2raindrop/state.json` | Sync state for idempotency |
+| `.x2raindrop/state.json` | Sync state for bookmarks and likes |
 
 Always mount a volume to `/data` to persist this data between runs.
 
@@ -459,7 +478,15 @@ Run `x2raindrop raindrop collections` to list available collections and their ID
 
 ### Rate Limit Errors
 
-Wait 15 minutes and try again. X API allows 180 bookmark requests per 15-minute window.
+Wait for the current rate-limit window to reset (often 15 minutes on Free Tier),
+then rerun. Fetching bookmarks/likes and each unbookmark/unlike consume separate
+request quota.
+
+### Likes sync fails with authorization / scope errors
+
+Ensure your X app token includes `like.read` (and `like.write` if removing likes).
+Re-authenticate with `x2raindrop x logout` then `x2raindrop x login` after updating
+scopes in `config.toml`.
 
 ## License
 
