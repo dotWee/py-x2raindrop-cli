@@ -11,6 +11,7 @@ from x2raindrop_cli.models import RaindropCreateRequest
 from x2raindrop_cli.raindrop.client import (
     MockRaindropClient,
     RaindropCollection,
+    normalize_link,
 )
 
 if TYPE_CHECKING:
@@ -187,6 +188,30 @@ class TestMockRaindropClient:
         client = MockRaindropClient()
 
         assert client.check_link_exists("https://example.com") is False
+
+    def test_list_collection_links_returns_existing(self) -> None:
+        """Test list_collection_links returns configured links."""
+        client = MockRaindropClient(existing_links=["https://example.com/"])
+
+        links = client.list_collection_links(100)
+
+        assert normalize_link("https://example.com") in links
+        assert client.list_collection_links_calls == [100]
+
+    def test_list_collection_links_includes_created(self) -> None:
+        """Test list_collection_links includes raindrops created in-session."""
+        client = MockRaindropClient()
+        client.create_raindrop(
+            RaindropCreateRequest(
+                link="https://created.example.com",
+                collection_id=100,
+                source_tweet_id="1",
+            )
+        )
+
+        links = client.list_collection_links(100)
+
+        assert "https://created.example.com" in links
 
 
 class TestRaindropCreateRequest:

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from x2raindrop_cli.config import SyncSettings
+from x2raindrop_cli.config import SourceSyncSettings, SyncSettings
 from x2raindrop_cli.models import BookmarkItem, BothBehavior, LinkMode
 from x2raindrop_cli.raindrop.client import MockRaindropClient, RaindropCollection
 from x2raindrop_cli.state import InMemoryState
@@ -121,7 +121,7 @@ def sample_oauth_token() -> OAuth2Token:
         refresh_token="test_refresh_token_67890",
         token_type="bearer",
         expires_at=datetime.now() + timedelta(hours=2),
-        scope="bookmark.read bookmark.write tweet.read users.read offline.access",
+        scope="bookmark.read bookmark.write like.read like.write tweet.read users.read offline.access",
     )
 
 
@@ -137,7 +137,7 @@ def expired_oauth_token() -> OAuth2Token:
         refresh_token="test_refresh_token",
         token_type="bearer",
         expires_at=datetime.now() - timedelta(hours=1),
-        scope="bookmark.read bookmark.write tweet.read users.read offline.access",
+        scope="bookmark.read bookmark.write like.read like.write tweet.read users.read offline.access",
     )
 
 
@@ -188,12 +188,16 @@ def sync_settings() -> SyncSettings:
         SyncSettings instance.
     """
     return SyncSettings(
-        collection_id=100,
-        collection_title="My Collection",
-        tags=["test", "automated"],
-        remove_from_x=False,
-        link_mode=LinkMode.PERMALINK,
-        both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        bookmarks=SourceSyncSettings(
+            enabled=True,
+            collection_id=100,
+            collection_title="My Collection",
+            tags=["test", "automated"],
+            remove_from_x=False,
+            link_mode=LinkMode.PERMALINK,
+            both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        ),
+        likes=SourceSyncSettings(enabled=False),
         dry_run=False,
     )
 
@@ -206,11 +210,15 @@ def sync_settings_with_remove() -> SyncSettings:
         SyncSettings instance with remove enabled.
     """
     return SyncSettings(
-        collection_id=100,
-        tags=["test"],
-        remove_from_x=True,
-        link_mode=LinkMode.PERMALINK,
-        both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        bookmarks=SourceSyncSettings(
+            enabled=True,
+            collection_id=100,
+            tags=["test"],
+            remove_from_x=True,
+            link_mode=LinkMode.PERMALINK,
+            both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        ),
+        likes=SourceSyncSettings(enabled=False),
         dry_run=False,
     )
 
@@ -223,11 +231,15 @@ def sync_settings_first_external() -> SyncSettings:
         SyncSettings with link_mode=FIRST_EXTERNAL_URL.
     """
     return SyncSettings(
-        collection_id=100,
-        tags=["test"],
-        remove_from_x=False,
-        link_mode=LinkMode.FIRST_EXTERNAL_URL,
-        both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        bookmarks=SourceSyncSettings(
+            enabled=True,
+            collection_id=100,
+            tags=["test"],
+            remove_from_x=False,
+            link_mode=LinkMode.FIRST_EXTERNAL_URL,
+            both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        ),
+        likes=SourceSyncSettings(enabled=False),
         dry_run=False,
     )
 
@@ -240,11 +252,15 @@ def sync_settings_both() -> SyncSettings:
         SyncSettings with link_mode=BOTH.
     """
     return SyncSettings(
-        collection_id=100,
-        tags=["test"],
-        remove_from_x=False,
-        link_mode=LinkMode.BOTH,
-        both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        bookmarks=SourceSyncSettings(
+            enabled=True,
+            collection_id=100,
+            tags=["test"],
+            remove_from_x=False,
+            link_mode=LinkMode.BOTH,
+            both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        ),
+        likes=SourceSyncSettings(enabled=False),
         dry_run=False,
     )
 
@@ -257,11 +273,15 @@ def sync_settings_both_two_raindrops() -> SyncSettings:
         SyncSettings with link_mode=BOTH and both_behavior=TWO_RAINDROPS.
     """
     return SyncSettings(
-        collection_id=100,
-        tags=["test"],
-        remove_from_x=False,
-        link_mode=LinkMode.BOTH,
-        both_behavior=BothBehavior.TWO_RAINDROPS,
+        bookmarks=SourceSyncSettings(
+            enabled=True,
+            collection_id=100,
+            tags=["test"],
+            remove_from_x=False,
+            link_mode=LinkMode.BOTH,
+            both_behavior=BothBehavior.TWO_RAINDROPS,
+        ),
+        likes=SourceSyncSettings(enabled=False),
         dry_run=False,
     )
 
@@ -274,10 +294,35 @@ def sync_settings_dry_run() -> SyncSettings:
         SyncSettings with dry_run=True.
     """
     return SyncSettings(
-        collection_id=100,
-        tags=["test"],
-        remove_from_x=False,
-        link_mode=LinkMode.PERMALINK,
-        both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        bookmarks=SourceSyncSettings(
+            enabled=True,
+            collection_id=100,
+            tags=["test"],
+            remove_from_x=False,
+            link_mode=LinkMode.PERMALINK,
+            both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        ),
+        likes=SourceSyncSettings(enabled=False),
         dry_run=True,
+    )
+
+
+@pytest.fixture
+def sync_settings_likes_only() -> SyncSettings:
+    """Create sync settings with likes enabled and bookmarks disabled.
+
+    Returns:
+        SyncSettings with likes sync enabled.
+    """
+    return SyncSettings(
+        bookmarks=SourceSyncSettings(enabled=False),
+        likes=SourceSyncSettings(
+            enabled=True,
+            collection_id=200,
+            tags=["like-test"],
+            remove_from_x=False,
+            link_mode=LinkMode.PERMALINK,
+            both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+        ),
+        dry_run=False,
     )

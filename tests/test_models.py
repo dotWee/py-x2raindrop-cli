@@ -195,32 +195,38 @@ class TestSyncResult:
         """Test default values."""
         result = SyncResult()
 
-        assert result.total_bookmarks == 0
+        assert result.bookmarks.total == 0
+        assert result.likes.total == 0
         assert result.already_synced == 0
         assert result.newly_synced == 0
         assert result.failed == 0
         assert result.deleted_from_x == 0
         assert result.errors == []
 
-    def test_add_error(self) -> None:
-        """Test adding errors."""
+    def test_add_error_on_source_result(self) -> None:
+        """Test adding errors on a source result."""
         result = SyncResult()
-        result.add_error("Error 1")
-        result.add_error("Error 2")
+        result.bookmarks.add_error("Error 1")
+        result.likes.add_error("Error 2")
 
         assert len(result.errors) == 2
         assert "Error 1" in result.errors
         assert "Error 2" in result.errors
 
-    def test_modify_counts(self) -> None:
-        """Test modifying result counts."""
+    def test_aggregate_counts(self) -> None:
+        """Test aggregate counts across sources."""
         result = SyncResult()
-        result.total_bookmarks = 10
-        result.newly_synced = 5
-        result.already_synced = 3
-        result.failed = 2
+        result.bookmarks.total = 10
+        result.bookmarks.newly_synced = 5
+        result.bookmarks.already_synced = 3
+        result.bookmarks.failed = 2
+        result.bookmarks.removed_from_x = 1
+        result.likes.newly_synced = 4
+        result.likes.removed_from_x = 2
 
         assert result.total_bookmarks == 10
-        assert result.newly_synced == 5
+        assert result.newly_synced == 9
         assert result.already_synced == 3
         assert result.failed == 2
+        assert result.deleted_from_x == 3
+        assert result.removed_from_x == 3

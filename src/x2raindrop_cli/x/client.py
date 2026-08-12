@@ -1,7 +1,8 @@
-"""X (Twitter) API client for bookmark operations.
+"""X (Twitter) API client for bookmark and liked-post operations.
 
-This module wraps the official Python XDK client for bookmark workflows while
-keeping the app-specific `BookmarkItem` parsing and request tracking behavior.
+This module wraps the official Python XDK client for bookmark and likes
+workflows while keeping the app-specific `BookmarkItem` parsing and request
+tracking behavior.
 """
 
 from __future__ import annotations
@@ -44,11 +45,33 @@ class XClientProtocol(Protocol):
         """
         ...
 
+    def get_liked_posts(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
+        """Fetch liked posts from X.
+
+        Args:
+            max_results: Maximum total results to fetch.
+
+        Yields:
+            BookmarkItem for each liked post.
+        """
+        ...
+
     def delete_bookmark(self, tweet_id: str) -> bool:
         """Remove a bookmark from X.
 
         Args:
             tweet_id: ID of the tweet to unbookmark.
+
+        Returns:
+            True if successful.
+        """
+        ...
+
+    def unlike_post(self, tweet_id: str) -> bool:
+        """Remove a like from X.
+
+        Args:
+            tweet_id: ID of the tweet to unlike.
 
         Returns:
             True if successful.
@@ -65,7 +88,7 @@ class XClientProtocol(Protocol):
 
 
 class XClient:
-    """Client for interacting with X API bookmarks.
+    """Client for interacting with X API bookmarks and liked posts.
 
     Uses the official Python XDK client for all API operations and tracks the
     number of API calls performed in this process for visibility.
@@ -179,23 +202,51 @@ class XClient:
             BookmarkItem for each bookmark.
 
         """
+        yield from self._fetch_posts(
+            fetch_pages=self._x_client.users.get_bookmarks,
+            source_label="bookmarks",
+            max_results=max_results,
+        )
+
+    def get_liked_posts(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
+        """Fetch liked posts from X with pagination.
+
+        Args:
+            max_results: Maximum total results to fetch. None for all.
+
+        Yields:
+            BookmarkItem for each liked post.
+
+        """
+        yield from self._fetch_posts(
+            fetch_pages=self._x_client.users.get_liked_posts,
+            source_label="liked posts",
+            max_results=max_results,
+        )
+
+    def _fetch_posts(
+        self,
+        fetch_pages: Any,
+        source_label: str,
+        max_results: int | None,
+    ) -> Iterator[BookmarkItem]:
+        """Fetch paginated posts from an X users endpoint."""
         self._ensure_fresh_token()
         user_id = self.get_authenticated_user_id()
         total_fetched = 0
         page_count = 0
-        for page in self._x_client.users.get_bookmarks(
+        for page in fetch_pages(
             id=user_id,
             max_results=MAX_RESULTS_PER_PAGE,
             expansions=["author_id"],
-            tweet_fields=["created_at", "text", "entities", "author_id"],
+            post_fields=["created_at", "text", "entities"],
             user_fields=["username", "name"],
         ):
             page_count += 1
             self._request_count += 1
-            logger.debug("Fetching bookmarks page", page=page_count)
+            logger.debug(f"Fetching {source_label} page", page=page_count)
             data = self._model_to_dict(page)
 
-            # Build user lookup for author info
             users_lookup: dict[str, dict[str, str]] = {}
             includes = data.get("includes", {})
             include_users = includes.get("users", []) if isinstance(includes, dict) else []
@@ -210,13 +261,12 @@ class XClient:
                     "name": str(user.get("name", "")),
                 }
 
-            # Process tweets
             tweets = data.get("data", [])
             if not isinstance(tweets, list):
                 tweets = []
             if not tweets:
                 logger.info(
-                    "No bookmarks found or end of results",
+                    f"No {source_label} found or end of results",
                     pages_fetched=page_count,
                     total_fetched=total_fetched,
                 )
@@ -232,13 +282,14 @@ class XClient:
                 if max_results and total_fetched >= max_results:
                     logger.info(
                         "Reached max results limit",
+                        source=source_label,
                         max_results=max_results,
                         pages_fetched=page_count,
                     )
                     return
 
         logger.info(
-            "Fetched all bookmarks",
+            f"Fetched all {source_label}",
             total=total_fetched,
             pages_fetched=page_count,
             api_requests=self._request_count,
@@ -279,11 +330,12 @@ class XClient:
         Returns:
             BookmarkItem instance.
         """
-        tweet_id = tweet["id"]
+        tweet_id = str(tweet["id"])
         text = tweet.get("text", "")
-        author_id = tweet.get("author_id")
+        author_id_raw = tweet.get("author_id")
+        author_id = str(author_id_raw) if author_id_raw is not None else None
 
-        # Get author info
+        # Get author info (keys in users_lookup are always strings)
         author_username: str | None = None
         author_name: str | None = None
         if author_id and author_id in users_lookup:
@@ -326,11 +378,18 @@ class XClient:
             List of external URLs.
         """
         external_urls: list[str] = []
-        entities = tweet.get("entities", {})
+        # XDK model_dump may include entities=None when the field was requested
+        # but the post has no entities object.
+        entities = tweet.get("entities") or {}
+        if not isinstance(entities, dict):
+            entities = {}
 
         # URLs from entities (preferred, has expanded URLs)
-        if "urls" in entities:
-            for url_entity in entities["urls"]:
+        url_entities = entities.get("urls") or []
+        if isinstance(url_entities, list):
+            for url_entity in url_entities:
+                if not isinstance(url_entity, dict):
+                    continue
                 # Use expanded_url if available, otherwise unwrapped_url
                 expanded = url_entity.get("expanded_url") or url_entity.get("unwrapped_url")
                 # Filter out t.co and X/Twitter internal URLs
@@ -343,7 +402,7 @@ class XClient:
 
         # Fallback: extract from text if no entity URLs
         if not external_urls:
-            text = tweet.get("text", "")
+            text = tweet.get("text") or ""
             matches = URL_PATTERN.findall(text)
             external_urls = [
                 url
@@ -388,6 +447,41 @@ class XClient:
 
         return success
 
+    def unlike_post(self, tweet_id: str) -> bool:
+        """Remove a like from a post.
+
+        Args:
+            tweet_id: ID of the tweet to unlike.
+
+        Returns:
+            True if successful.
+        """
+        self._ensure_fresh_token()
+        user_id = self.get_authenticated_user_id()
+        self._request_count += 1
+
+        logger.warning(
+            "Unliking post (uses 1 API request)",
+            tweet_id=tweet_id,
+            total_requests=self._request_count,
+        )
+
+        response = self._x_client.users.unlike_post(id=user_id, tweet_id=tweet_id)
+        response_data = self._model_to_dict(response)
+        data = response_data.get("data", {})
+        success = isinstance(data, dict) and data.get("liked") is False
+
+        if success:
+            logger.debug("Unliked post", tweet_id=tweet_id)
+        else:
+            logger.warning(
+                "Unlike post returned unexpected response",
+                tweet_id=tweet_id,
+                data=data,
+            )
+
+        return success
+
 
 class MockXClient:
     """Mock X client for testing.
@@ -399,17 +493,21 @@ class MockXClient:
     def __init__(
         self,
         bookmarks: list[BookmarkItem] | None = None,
+        liked_posts: list[BookmarkItem] | None = None,
         user_id: str = "123456789",
     ) -> None:
         """Initialize mock client.
 
         Args:
             bookmarks: List of bookmarks to return.
+            liked_posts: List of liked posts to return.
             user_id: Fake user ID to return.
         """
         self.bookmarks = bookmarks or []
+        self.liked_posts = liked_posts or []
         self.user_id = user_id
         self.deleted_tweet_ids: list[str] = []
+        self.unliked_tweet_ids: list[str] = []
 
     def get_authenticated_user_id(self) -> str:
         """Get the mock user ID."""
@@ -417,12 +515,29 @@ class MockXClient:
 
     def get_bookmarks(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
         """Yield pre-configured bookmarks."""
-        for i, bookmark in enumerate(self.bookmarks):
+        yield from self._yield_items(self.bookmarks, max_results)
+
+    def get_liked_posts(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
+        """Yield pre-configured liked posts."""
+        yield from self._yield_items(self.liked_posts, max_results)
+
+    def _yield_items(
+        self,
+        items: list[BookmarkItem],
+        max_results: int | None,
+    ) -> Iterator[BookmarkItem]:
+        """Yield items up to max_results."""
+        for i, item in enumerate(items):
             if max_results and i >= max_results:
                 break
-            yield bookmark
+            yield item
 
     def delete_bookmark(self, tweet_id: str) -> bool:
         """Track deleted bookmark."""
         self.deleted_tweet_ids.append(tweet_id)
+        return True
+
+    def unlike_post(self, tweet_id: str) -> bool:
+        """Track unliked post."""
+        self.unliked_tweet_ids.append(tweet_id)
         return True

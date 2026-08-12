@@ -23,6 +23,21 @@ logger = structlog.get_logger(__name__)
 # Maximum number of items accepted by Raindrop bulk create endpoint
 MAX_BATCH_CREATE_SIZE = 100
 
+# Raindrop list endpoint max page size
+MAX_LIST_PAGE_SIZE = 50
+
+
+def normalize_link(link: str) -> str:
+    """Normalize links to avoid false negatives on trailing slashes.
+
+    Args:
+        link: Raw URL string.
+
+    Returns:
+        Stripped URL without a trailing slash.
+    """
+    return link.strip().rstrip("/")
+
 
 @dataclass
 class RaindropCollection:
@@ -99,6 +114,17 @@ class RaindropClientProtocol(Protocol):
 
         Returns:
             Created Raindrop details in the same order as requests.
+        """
+        ...
+
+    def list_collection_links(self, collection_id: int) -> set[str]:
+        """List normalized links present in a Raindrop collection.
+
+        Args:
+            collection_id: Collection to inventory.
+
+        Returns:
+            Set of normalized link URLs in the collection.
         """
         ...
 
@@ -370,8 +396,63 @@ class RaindropClient:
         logger.info("Created raindrops in bulk", count=len(created_raindrops))
         return created_raindrops
 
+    def list_collection_links(self, collection_id: int) -> set[str]:
+        """Paginate a collection and return normalized link URLs.
+
+        Uses the list endpoint (``perpage`` ≤ 50) instead of per-link search,
+        so large syncs stay within Raindrop's rate limits.
+
+        Args:
+            collection_id: Target Raindrop collection ID.
+
+        Returns:
+            Set of normalized links currently in the collection.
+        """
+        links: set[str] = set()
+        page = 0
+        collection_path = str(collection_id)
+
+        while True:
+            list_url = (
+                f"https://api.raindrop.io/rest/v1/raindrops/{collection_path}"
+                f"?perpage={MAX_LIST_PAGE_SIZE}&page={page}"
+            )
+            logger.debug(
+                "Listing collection links page",
+                collection_id=collection_id,
+                page=page,
+            )
+            response = self.api.get(list_url)
+            response.raise_for_status()
+            response_data = response.json()
+            items = response_data.get("items", [])
+            if not isinstance(items, list) or not items:
+                break
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_link = item.get("link")
+                if isinstance(item_link, str) and item_link:
+                    links.add(normalize_link(item_link))
+
+            if len(items) < MAX_LIST_PAGE_SIZE:
+                break
+            page += 1
+
+        logger.info(
+            "Loaded collection link inventory",
+            collection_id=collection_id,
+            link_count=len(links),
+            pages=page + 1,
+        )
+        return links
+
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if a link already exists in Raindrop.
+
+        Prefer :meth:`list_collection_links` for bulk syncs. This method remains
+        for one-off checks and uses a targeted search.
 
         Args:
             link: URL to check.
@@ -380,12 +461,12 @@ class RaindropClient:
         Returns:
             True if the link exists.
         """
-        normalized_link = self._normalize_link(link)
+        normalized_link = normalize_link(link)
         collection_path = str(collection_id) if collection_id is not None else "0"
         search_term = quote(link, safe="")
         search_url = (
             f"https://api.raindrop.io/rest/v1/raindrops/{collection_path}"
-            f"?search={search_term}&perpage=100"
+            f"?search={search_term}&perpage={MAX_LIST_PAGE_SIZE}"
         )
         response = self.api.get(search_url)
         response.raise_for_status()
@@ -400,13 +481,13 @@ class RaindropClient:
             item_link = item.get("link")
             if not isinstance(item_link, str):
                 continue
-            if self._normalize_link(item_link) == normalized_link:
+            if normalize_link(item_link) == normalized_link:
                 return True
         return False
 
     def _normalize_link(self, link: str) -> str:
         """Normalize links to avoid false negatives on trailing slashes."""
-        return link.strip().rstrip("/")
+        return normalize_link(link)
 
 
 class MockRaindropClient:
@@ -434,7 +515,8 @@ class MockRaindropClient:
         self.created_raindrops: list[RaindropCreateRequest] = []
         self.batch_create_calls: list[list[RaindropCreateRequest]] = []
         self._next_id = 1
-        self.existing_links = {self._normalize_link(link) for link in existing_links or []}
+        self.existing_links = {normalize_link(link) for link in existing_links or []}
+        self.list_collection_links_calls: list[int] = []
 
     def list_collections(self) -> list[RaindropCollection]:
         """Return pre-configured collections."""
@@ -465,14 +547,22 @@ class MockRaindropClient:
         self.batch_create_calls.append(list(requests))
         return [self.create_raindrop(request) for request in requests]
 
+    def list_collection_links(self, collection_id: int) -> set[str]:
+        """Return configured existing links plus links created in this session."""
+        self.list_collection_links_calls.append(collection_id)
+        links = set(self.existing_links)
+        for request in self.created_raindrops:
+            links.add(normalize_link(request.link))
+        return links
+
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if link was already created in this session."""
         del collection_id
-        normalized = self._normalize_link(link)
+        normalized = normalize_link(link)
         if normalized in self.existing_links:
             return True
-        return any(self._normalize_link(r.link) == normalized for r in self.created_raindrops)
+        return any(normalize_link(r.link) == normalized for r in self.created_raindrops)
 
     def _normalize_link(self, link: str) -> str:
         """Normalize links for duplicate checks."""
-        return link.strip().rstrip("/")
+        return normalize_link(link)

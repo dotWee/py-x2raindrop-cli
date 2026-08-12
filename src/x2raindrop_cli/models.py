@@ -26,6 +26,18 @@ class LinkMode(StrEnum):
     BOTH = "both"
 
 
+class PostSource(StrEnum):
+    """Origin of an X post in the sync pipeline.
+
+    Attributes:
+        BOOKMARKS: Post fetched from X bookmarks.
+        LIKES: Post fetched from X liked posts.
+    """
+
+    BOOKMARKS = "bookmarks"
+    LIKES = "likes"
+
+
 class BothBehavior(StrEnum):
     """When LinkMode is BOTH, how to handle multiple links.
 
@@ -121,23 +133,23 @@ class SyncedBookmark(BaseModel):
     deleted_from_x: bool = Field(False, description="Whether deleted from X")
 
 
-class SyncResult(BaseModel):
-    """Result of a sync operation.
+class SourceSyncResult(BaseModel):
+    """Result of syncing one X post source (bookmarks or likes).
 
     Attributes:
-        total_bookmarks: Total bookmarks fetched from X.
+        total: Total posts fetched from X for this source.
         already_synced: Number skipped (already synced).
         newly_synced: Number successfully synced.
         failed: Number that failed to sync.
-        deleted_from_x: Number deleted from X bookmarks.
+        removed_from_x: Number removed from X (unbookmark/unlike).
         errors: List of error messages.
     """
 
-    total_bookmarks: int = 0
+    total: int = 0
     already_synced: int = 0
     newly_synced: int = 0
     failed: int = 0
-    deleted_from_x: int = 0
+    removed_from_x: int = 0
     errors: list[str] = Field(default_factory=list)
 
     def add_error(self, error: str) -> None:
@@ -147,3 +159,50 @@ class SyncResult(BaseModel):
             error: The error message to add.
         """
         self.errors.append(error)
+
+
+class SyncResult(BaseModel):
+    """Result of a sync operation across enabled post sources.
+
+    Attributes:
+        bookmarks: Results for bookmark sync.
+        likes: Results for liked-post sync.
+    """
+
+    bookmarks: SourceSyncResult = Field(default_factory=SourceSyncResult)
+    likes: SourceSyncResult = Field(default_factory=SourceSyncResult)
+
+    @property
+    def total_bookmarks(self) -> int:
+        """Backward-compatible alias for bookmark total count."""
+        return self.bookmarks.total
+
+    @property
+    def already_synced(self) -> int:
+        """Total already-synced items across all enabled sources."""
+        return self.bookmarks.already_synced + self.likes.already_synced
+
+    @property
+    def newly_synced(self) -> int:
+        """Total newly synced items across all enabled sources."""
+        return self.bookmarks.newly_synced + self.likes.newly_synced
+
+    @property
+    def failed(self) -> int:
+        """Total failed items across all enabled sources."""
+        return self.bookmarks.failed + self.likes.failed
+
+    @property
+    def deleted_from_x(self) -> int:
+        """Total removals from X across all sources (unbookmark + unlike)."""
+        return self.bookmarks.removed_from_x + self.likes.removed_from_x
+
+    @property
+    def removed_from_x(self) -> int:
+        """Total removals from X across all sources."""
+        return self.deleted_from_x
+
+    @property
+    def errors(self) -> list[str]:
+        """Combined error messages from all sources."""
+        return self.bookmarks.errors + self.likes.errors
