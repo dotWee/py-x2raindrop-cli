@@ -7,16 +7,13 @@ for creating bookmarks and listing collections.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 import structlog
 from raindropio import API, Collection, CollectionRef, Raindrop
 
 from x2raindrop_cli.models import RaindropCreateRequest
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -313,8 +310,9 @@ class RaindropClient:
             create_kwargs["title"] = request.title
         if request.excerpt:
             create_kwargs["excerpt"] = request.excerpt
-        # Note: python-raindropio may not support a dedicated note field.
-        if request.note and not request.excerpt:
+        # python-raindropio has no dedicated note kwarg; fall back only when
+        # excerpt is empty so note content is not silently dropped.
+        elif request.note:
             create_kwargs["excerpt"] = request.note
         return create_kwargs
 
@@ -335,6 +333,9 @@ class RaindropClient:
             payload["title"] = create_kwargs["title"]
         if "excerpt" in create_kwargs:
             payload["excerpt"] = create_kwargs["excerpt"]
+        # REST bulk create supports a dedicated note field distinct from excerpt.
+        if request.note:
+            payload["note"] = request.note
 
         return payload
 
@@ -487,82 +488,4 @@ class RaindropClient:
 
     def _normalize_link(self, link: str) -> str:
         """Normalize links to avoid false negatives on trailing slashes."""
-        return normalize_link(link)
-
-
-class MockRaindropClient:
-    """Mock Raindrop client for testing.
-
-    This client can be configured with pre-defined collections
-    and tracks created raindrops for verification.
-    """
-
-    def __init__(
-        self,
-        collections: list[RaindropCollection] | None = None,
-        existing_links: list[str] | None = None,
-    ) -> None:
-        """Initialize mock client.
-
-        Args:
-            collections: List of collections to return.
-            existing_links: Links already present in Raindrop.
-        """
-        self.collections = collections or [
-            RaindropCollection(id=12345, title="Test Collection", count=0),
-            RaindropCollection(id=-1, title="Unsorted", count=0),
-        ]
-        self.created_raindrops: list[RaindropCreateRequest] = []
-        self.batch_create_calls: list[list[RaindropCreateRequest]] = []
-        self._next_id = 1
-        self.existing_links = {normalize_link(link) for link in existing_links or []}
-        self.list_collection_links_calls: list[int] = []
-
-    def list_collections(self) -> list[RaindropCollection]:
-        """Return pre-configured collections."""
-        return self.collections
-
-    def get_collection_by_title(self, title: str) -> RaindropCollection | None:
-        """Find collection by title."""
-        title_lower = title.lower()
-        for c in self.collections:
-            if c.title.lower() == title_lower:
-                return c
-        return None
-
-    def create_raindrop(self, request: RaindropCreateRequest) -> CreatedRaindrop:
-        """Track created raindrop."""
-        self.created_raindrops.append(request)
-        raindrop_id = self._next_id
-        self._next_id += 1
-        return CreatedRaindrop(
-            id=raindrop_id,
-            link=request.link,
-            title=request.title or "",
-            collection_id=request.collection_id,
-        )
-
-    def create_raindrops(self, requests: list[RaindropCreateRequest]) -> list[CreatedRaindrop]:
-        """Track bulk-created raindrops in order."""
-        self.batch_create_calls.append(list(requests))
-        return [self.create_raindrop(request) for request in requests]
-
-    def list_collection_links(self, collection_id: int) -> set[str]:
-        """Return configured existing links plus links created in this session."""
-        self.list_collection_links_calls.append(collection_id)
-        links = set(self.existing_links)
-        for request in self.created_raindrops:
-            links.add(normalize_link(request.link))
-        return links
-
-    def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
-        """Check if link was already created in this session."""
-        del collection_id
-        normalized = normalize_link(link)
-        if normalized in self.existing_links:
-            return True
-        return any(normalize_link(r.link) == normalized for r in self.created_raindrops)
-
-    def _normalize_link(self, link: str) -> str:
-        """Normalize links for duplicate checks."""
         return normalize_link(link)

@@ -8,7 +8,6 @@ and optional removal from X.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING
 
 import structlog
 
@@ -25,9 +24,6 @@ from x2raindrop_cli.models import (
 from x2raindrop_cli.raindrop.client import RaindropClientProtocol, normalize_link
 from x2raindrop_cli.state import SyncState
 from x2raindrop_cli.x.client import XClientProtocol
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -151,6 +147,41 @@ class SyncService:
         self.settings = settings
         self._collection_link_cache: dict[int, set[str]] = {}
 
+    def _resolve_collection_ids(self) -> None:
+        """Resolve ``collection_title`` to ``collection_id`` when ID is unset.
+
+        Raises:
+            ValueError: If a title is set but no matching collection exists.
+        """
+        for source_name, source_settings in (
+            ("bookmarks", self.settings.bookmarks),
+            ("likes", self.settings.likes),
+        ):
+            if not source_settings.enabled:
+                continue
+            if source_settings.collection_id:
+                continue
+
+            title = (source_settings.collection_title or "").strip()
+            if not title:
+                raise ValueError(
+                    f"{source_name}.collection_id or {source_name}.collection_title must be set"
+                )
+
+            collection = self.raindrop_client.get_collection_by_title(title)
+            if collection is None:
+                raise ValueError(
+                    f"Raindrop collection titled {title!r} not found for {source_name}"
+                )
+
+            logger.info(
+                "Resolved collection title to ID",
+                source=source_name,
+                title=title,
+                collection_id=collection.id,
+            )
+            source_settings.collection_id = collection.id
+
     def sync(
         self,
         progress_callback: ProgressCallback | None = None,
@@ -165,6 +196,7 @@ class SyncService:
         """
         result = SyncResult()
         self.settings.validate_enabled_sources()
+        self._resolve_collection_ids()
         self.state.load()
         self._collection_link_cache.clear()
 

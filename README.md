@@ -216,6 +216,9 @@ uv run x2raindrop sync --collection 12345 --link-mode first_external_url
 # Remove synced items from X after syncing (unbookmark and/or unlike)
 uv run x2raindrop sync --collection 12345 --likes --likes-collection 54321 --remove-from-x
 
+# Override config that has remove_from_x / dry_run enabled
+uv run x2raindrop sync --no-remove-from-x --no-dry-run
+
 # Dry run - see what would happen without making changes
 uv run x2raindrop sync --collection 12345 --likes --likes-collection 54321 --dry-run
 ```
@@ -275,7 +278,7 @@ dry_run = false
 [sync.bookmarks]
 enabled = true
 collection_id = 12345
-collection_title = ""  # Optional: look up collection by title
+collection_title = ""  # Optional: look up by title when collection_id is unset
 tags = ["x-bookmark", "auto-synced"]
 remove_from_x = false
 skip_existing_links = true
@@ -285,7 +288,7 @@ both_behavior = "one_external_plus_note"  # one_external_plus_note or two_raindr
 [sync.likes]
 enabled = false
 collection_id = 54321
-collection_title = ""
+collection_title = ""  # Optional: look up by title when collection_id is unset
 tags = ["x-like", "auto-synced"]
 remove_from_x = false  # Unlike posts on X after syncing
 skip_existing_links = true
@@ -293,11 +296,17 @@ link_mode = "permalink"
 both_behavior = "one_external_plus_note"
 ```
 
+Copy [`config.example.toml`](config.example.toml) as a starting point, or run `x2raindrop config init`.
+
 Legacy flat `[sync]` settings (without `bookmarks` / `likes` sections) are still
 supported and are treated as bookmark settings for backward compatibility.
 
 Each source can be configured independently: different Raindrop collections,
 tags, link modes, and remove-from-X behavior.
+
+CLI flags override config when passed. Boolean flags are tri-state, so
+`--no-remove-from-x` and `--no-dry-run` clear values that are enabled in config.
+`log_level` controls stdlib/structlog verbosity for CLI commands.
 
 ### Link Modes
 

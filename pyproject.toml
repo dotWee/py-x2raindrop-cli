@@ -11,7 +11,7 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
-  "License :: OSI Approved",
+  "License :: Freely Distributable",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
@@ -23,7 +23,6 @@ dependencies = [
   "httpx>=0.28.1",
   "pydantic>=2.13.3",
   "pydantic-settings>=2.14.0",
-  "python-dotenv>=1.2.2",
   "python-raindropio>=0.0.4",
   "rich>=15.0.0",
   "structlog>=25.5.0",
@@ -43,11 +42,9 @@ x2raindrop = "x2raindrop_cli.cli:app"
 [dependency-groups]
 dev = [
   "pytest>=9.0.3",
-  "pytest-asyncio>=1.3.0",
   "pytest-cov>=7.1.0",
   "pytest-mock>=3.15.1",
   "ruff>=0.15.11",
-  "types-requests>=2.33.0.20260408",
   "ty>=0.0.32",
 ]
 
@@ -81,7 +78,7 @@ possibly-unresolved-reference = "warn"
 [tool.ty.terminal]
 error-on-warning = true
 
-[tool.pytest]
+[tool.pytest.ini_options]
 addopts = [
   "--cov-report=html",
   "--cov-report=term-missing",

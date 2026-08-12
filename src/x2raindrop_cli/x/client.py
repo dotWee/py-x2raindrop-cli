@@ -11,16 +11,13 @@ import contextlib
 import re
 from collections.abc import Iterator
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 import structlog
 from xdk import Client as XdkClient
 
 from x2raindrop_cli.models import BookmarkItem
 from x2raindrop_cli.x.auth_pkce import OAuth2Token, refresh_access_token
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -481,63 +478,3 @@ class XClient:
             )
 
         return success
-
-
-class MockXClient:
-    """Mock X client for testing.
-
-    This client can be configured with pre-defined bookmarks
-    and tracks delete calls for verification.
-    """
-
-    def __init__(
-        self,
-        bookmarks: list[BookmarkItem] | None = None,
-        liked_posts: list[BookmarkItem] | None = None,
-        user_id: str = "123456789",
-    ) -> None:
-        """Initialize mock client.
-
-        Args:
-            bookmarks: List of bookmarks to return.
-            liked_posts: List of liked posts to return.
-            user_id: Fake user ID to return.
-        """
-        self.bookmarks = bookmarks or []
-        self.liked_posts = liked_posts or []
-        self.user_id = user_id
-        self.deleted_tweet_ids: list[str] = []
-        self.unliked_tweet_ids: list[str] = []
-
-    def get_authenticated_user_id(self) -> str:
-        """Get the mock user ID."""
-        return self.user_id
-
-    def get_bookmarks(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
-        """Yield pre-configured bookmarks."""
-        yield from self._yield_items(self.bookmarks, max_results)
-
-    def get_liked_posts(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
-        """Yield pre-configured liked posts."""
-        yield from self._yield_items(self.liked_posts, max_results)
-
-    def _yield_items(
-        self,
-        items: list[BookmarkItem],
-        max_results: int | None,
-    ) -> Iterator[BookmarkItem]:
-        """Yield items up to max_results."""
-        for i, item in enumerate(items):
-            if max_results and i >= max_results:
-                break
-            yield item
-
-    def delete_bookmark(self, tweet_id: str) -> bool:
-        """Track deleted bookmark."""
-        self.deleted_tweet_ids.append(tweet_id)
-        return True
-
-    def unlike_post(self, tweet_id: str) -> bool:
-        """Track unliked post."""
-        self.unliked_tweet_ids.append(tweet_id)
-        return True

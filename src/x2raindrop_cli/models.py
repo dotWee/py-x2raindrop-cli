@@ -6,7 +6,7 @@ items to be created in Raindrop.io.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -129,7 +129,10 @@ class SyncedBookmark(BaseModel):
 
     tweet_id: str = Field(..., description="Source X tweet ID")
     raindrop_links: list[str] = Field(default_factory=list, description="Created Raindrop URLs")
-    synced_at: datetime = Field(default_factory=datetime.now, description="Sync timestamp")
+    synced_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Sync timestamp",
+    )
     deleted_from_x: bool = Field(False, description="Whether deleted from X")
 
 

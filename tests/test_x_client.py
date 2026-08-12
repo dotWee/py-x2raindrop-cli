@@ -6,13 +6,9 @@ This module tests the X API client and URL extraction logic.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
+from tests.fakes import MockXClient
 from x2raindrop_cli.models import BookmarkItem
-from x2raindrop_cli.x.client import MockXClient
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestMockXClient:

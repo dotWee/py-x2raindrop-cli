@@ -9,19 +9,15 @@ import tempfile
 from collections.abc import Generator
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.fakes import MockRaindropClient, MockXClient
 from x2raindrop_cli.config import SourceSyncSettings, SyncSettings
 from x2raindrop_cli.models import BookmarkItem, BothBehavior, LinkMode
-from x2raindrop_cli.raindrop.client import MockRaindropClient, RaindropCollection
+from x2raindrop_cli.raindrop.client import RaindropCollection
 from x2raindrop_cli.state import InMemoryState
 from x2raindrop_cli.x.auth_pkce import OAuth2Token
-from x2raindrop_cli.x.client import MockXClient
-
-if TYPE_CHECKING:
-    pass
 
 
 @pytest.fixture

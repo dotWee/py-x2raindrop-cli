@@ -8,16 +8,13 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import tomli_w
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from x2raindrop_cli.models import BothBehavior, LinkMode
-
-if TYPE_CHECKING:
-    pass
 
 
 def get_default_config_dir() -> Path:
@@ -158,7 +155,7 @@ class RaindropSettings(BaseSettings):
         extra="ignore",
     )
 
-    token: str = Field(..., description="Raindrop.io API token")
+    token: str | None = Field(None, description="Raindrop.io API token")
 
 
 _LEGACY_SYNC_SOURCE_FIELDS = (
@@ -279,24 +276,36 @@ class SyncSettings(BaseSettings):
         """Return True if at least one sync source is enabled."""
         return self.bookmarks.enabled or self.likes.enabled
 
-    def validate_enabled_sources(self) -> None:
-        """Validate that each enabled source has a usable collection ID.
+    @staticmethod
+    def _has_collection_target(source: SourceSyncSettings) -> bool:
+        """Return True if a source has a usable collection ID or title.
 
         Collection ID ``0`` is Raindrop's system "All" collection and cannot be
         used as a create target, so it is treated as unset.
+        """
+        if source.collection_id:
+            return True
+        return bool(source.collection_title and source.collection_title.strip())
+
+    def validate_enabled_sources(self) -> None:
+        """Validate that each enabled source has a usable collection target.
+
+        Each enabled source must set either ``collection_id`` (not ``0``/All)
+        or a non-empty ``collection_title`` for lookup.
 
         Raises:
-            ValueError: If an enabled source is missing collection_id.
+            ValueError: If an enabled source is missing a collection target,
+                or if no sources are enabled.
         """
-        if self.bookmarks.enabled and not self.bookmarks.collection_id:
+        if self.bookmarks.enabled and not self._has_collection_target(self.bookmarks):
             raise ValueError(
-                "bookmarks.collection_id must be set to a real collection "
-                "(not 0/All) when bookmark sync is enabled"
+                "bookmarks.collection_id or bookmarks.collection_title must be set "
+                "(collection_id must not be 0/All) when bookmark sync is enabled"
             )
-        if self.likes.enabled and not self.likes.collection_id:
+        if self.likes.enabled and not self._has_collection_target(self.likes):
             raise ValueError(
-                "likes.collection_id must be set to a real collection "
-                "(not 0/All) when like sync is enabled"
+                "likes.collection_id or likes.collection_title must be set "
+                "(collection_id must not be 0/All) when like sync is enabled"
             )
         if not self.any_enabled():
             raise ValueError("At least one sync source (bookmarks or likes) must be enabled")

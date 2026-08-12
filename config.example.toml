@@ -1,0 +1,49 @@
+log_level = "INFO"
+
+[x]
+# Option A: Direct access token (simplest - no browser login needed)
+access_token = ""
+# Optional: refresh token paired with access_token for auto-refresh
+refresh_token = ""
+
+# Option B: OAuth PKCE flow (use `x2raindrop x login`)
+client_id = ""
+client_secret = ""
+redirect_uri = "http://127.0.0.1:8765/callback"
+scopes = [
+    "bookmark.read",
+    "bookmark.write",
+    "like.read",
+    "like.write",
+    "tweet.read",
+    "users.read",
+    "offline.access",
+]
+
+[raindrop]
+token = "YOUR_RAINDROP_TOKEN"
+
+[sync]
+dry_run = false
+
+[sync.bookmarks]
+enabled = true
+# Set collection_id to a real Raindrop collection ID (not 0/All).
+# Use -1 for Unsorted. Example: collection_id = 12345
+# Or set collection_title to look up the collection by name when ID is unset.
+collection_title = ""
+tags = ["x-bookmark", "auto-synced"]
+remove_from_x = false
+skip_existing_links = true
+link_mode = "permalink"
+both_behavior = "one_external_plus_note"
+
+[sync.likes]
+enabled = false
+# Set collection_id when enabling likes sync, or use collection_title for lookup.
+collection_title = ""
+tags = ["x-like", "auto-synced"]
+remove_from_x = false
+skip_existing_links = true
+link_mode = "permalink"
+both_behavior = "one_external_plus_note"

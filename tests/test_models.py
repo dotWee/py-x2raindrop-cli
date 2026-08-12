@@ -6,7 +6,6 @@ This module tests the Pydantic models used throughout the application.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,9 +17,6 @@ from x2raindrop_cli.models import (
     SyncedBookmark,
     SyncResult,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestLinkMode:

@@ -6,11 +6,12 @@ This module tests configuration loading from env vars and config files.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
+from _pytest.monkeypatch import MonkeyPatch
 
 from x2raindrop_cli.config import (
+    RaindropSettings,
     SourceSyncSettings,
     SyncSettings,
     XSettings,
@@ -19,9 +20,6 @@ from x2raindrop_cli.config import (
     get_default_config_path,
 )
 from x2raindrop_cli.models import BothBehavior, LinkMode
-
-if TYPE_CHECKING:
-    from _pytest.monkeypatch import MonkeyPatch
 
 
 class TestGetDefaultPaths:
@@ -249,3 +247,26 @@ class TestSyncSettings:
 
         with pytest.raises(ValueError, match="At least one sync source"):
             settings.validate_enabled_sources()
+
+    def test_validate_enabled_sources_allows_collection_title(self) -> None:
+        """Test validation accepts collection_title when collection_id is unset."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=None,
+                collection_title="My Collection",
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+
+        settings.validate_enabled_sources()
+
+
+class TestRaindropSettings:
+    """Tests for Raindrop settings."""
+
+    def test_token_is_optional(self) -> None:
+        """Test Raindrop token can be omitted for X-only commands."""
+        settings = RaindropSettings()
+
+        assert settings.token is None

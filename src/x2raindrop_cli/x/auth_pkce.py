@@ -17,15 +17,12 @@ import time
 import urllib.parse
 import webbrowser
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 import structlog
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -71,7 +68,11 @@ class OAuth2Token:
         Returns:
             True if the token expires within 60 seconds.
         """
-        return datetime.now() >= (self.expires_at - timedelta(seconds=60))
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            # Legacy naive tokens: compare in the same naive clock domain.
+            return datetime.now() >= (expires_at - timedelta(seconds=60))
+        return datetime.now(UTC) >= (expires_at - timedelta(seconds=60))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization.
@@ -132,7 +133,7 @@ class OAuth2Token:
             access_token=access_token,
             refresh_token=None,  # Direct tokens typically don't have refresh tokens
             token_type=token_type,
-            expires_at=datetime.now() + timedelta(days=expires_in_days),
+            expires_at=datetime.now(UTC) + timedelta(days=expires_in_days),
             scope="",  # Unknown scope for direct tokens
         )
 
@@ -244,7 +245,7 @@ def exchange_code_for_token(
         token_data = response.json()
 
     expires_in = token_data.get("expires_in", 7200)
-    expires_at = datetime.now() + timedelta(seconds=expires_in)
+    expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
     return OAuth2Token(
         access_token=token_data["access_token"],
@@ -295,7 +296,7 @@ def refresh_access_token(
         token_data = response.json()
 
     expires_in = token_data.get("expires_in", 7200)
-    expires_at = datetime.now() + timedelta(seconds=expires_in)
+    expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
     return OAuth2Token(
         access_token=token_data["access_token"],
@@ -307,15 +308,15 @@ def refresh_access_token(
 
 
 def save_token(token: OAuth2Token, path: Path) -> None:
-    """Save a token to disk.
+    """Save a token to disk with restrictive permissions.
 
     Args:
         token: The token to save.
         path: Path to save the token to.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(token.to_dict(), f, indent=2)
+    path.write_text(json.dumps(token.to_dict(), indent=2) + "\n")
+    path.chmod(0o600)
     logger.debug("Token saved", path=str(path))
 
 

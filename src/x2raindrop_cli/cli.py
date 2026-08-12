@@ -6,7 +6,8 @@ Rich for beautiful terminal output.
 
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -30,23 +31,6 @@ from x2raindrop_cli.sync.service import SyncService
 from x2raindrop_cli.x.auth_pkce import OAuth2Token, PKCEAuthFlow
 from x2raindrop_cli.x.client import XClient
 
-# Configure structlog for CLI
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.dev.ConsoleRenderer(colors=True),
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    cache_logger_on_first_use=True,
-)
-
 logger = structlog.get_logger(__name__)
 
 # Create Typer app
@@ -67,6 +51,51 @@ app.add_typer(config_app, name="config")
 
 # Rich console for output
 console = Console()
+
+
+def configure_logging(level: str) -> None:
+    """Configure stdlib logging and structlog from a level name.
+
+    Args:
+        level: Logging level name such as ``INFO`` or ``DEBUG``.
+    """
+    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    logging.basicConfig(level=numeric_level, force=True)
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.dev.ConsoleRenderer(colors=True),
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+
+def _require_raindrop_token(settings: Settings) -> str:
+    """Return a Raindrop API token or raise a clear error.
+
+    Args:
+        settings: Application settings.
+
+    Returns:
+        Non-empty Raindrop API token.
+
+    Raises:
+        ValueError: If the token is missing.
+    """
+    token = settings.raindrop.token
+    if not token:
+        raise ValueError(
+            "Raindrop token is required. Set raindrop.token in config or RAINDROP_TOKEN."
+        )
+    return token
 
 
 def _get_pkce_client_id(settings: Settings) -> str:
@@ -110,7 +139,7 @@ def _get_x_token(settings: Settings) -> OAuth2Token | None:
                     refresh_token=settings.x.refresh_token,
                     token_type="bearer",
                     # Mark expired so refresh happens on first request when configured.
-                    expires_at=datetime.now(),
+                    expires_at=datetime.now(UTC),
                     scope="",
                 )
             return OAuth2Token.from_access_token(direct_token)
@@ -202,12 +231,12 @@ def sync(
         ),
     ] = None,
     remove_from_x: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--remove-from-x/--no-remove-from-x",
             help="Remove synced items from X after syncing (unbookmark/unlike)",
         ),
-    ] = False,
+    ] = None,
     skip_existing_links: Annotated[
         bool | None,
         typer.Option(
@@ -224,21 +253,24 @@ def sync(
         ),
     ] = None,
     dry_run: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--dry-run",
+            "--dry-run/--no-dry-run",
             "-n",
             help="Don't make any changes, just show what would happen",
         ),
-    ] = False,
+    ] = None,
 ) -> None:
     """Sync X bookmarks and/or likes to Raindrop.io.
 
     Fetches your X bookmarks and/or liked posts and creates corresponding
     Raindrop.io bookmarks in the configured collections.
     """
+    x_client: XClient | None = None
+    raindrop_client: RaindropClient | None = None
     try:
         settings = load_settings(config_path)
+        configure_logging(settings.log_level)
 
         if bookmarks is not None:
             settings.sync.bookmarks.enabled = bookmarks
@@ -253,11 +285,11 @@ def sync(
                 settings.sync.likes.enabled = True
         if tags is not None:
             settings.sync.bookmarks.tags = [t.strip() for t in tags.split(",") if t.strip()]
-        if remove_from_x:
+        if remove_from_x is not None:
             if settings.sync.bookmarks.enabled:
-                settings.sync.bookmarks.remove_from_x = True
+                settings.sync.bookmarks.remove_from_x = remove_from_x
             if settings.sync.likes.enabled:
-                settings.sync.likes.remove_from_x = True
+                settings.sync.likes.remove_from_x = remove_from_x
         if skip_existing_links is not None:
             if settings.sync.bookmarks.enabled:
                 settings.sync.bookmarks.skip_existing_links = skip_existing_links
@@ -268,14 +300,16 @@ def sync(
                 settings.sync.bookmarks.link_mode = link_mode
             if settings.sync.likes.enabled:
                 settings.sync.likes.link_mode = link_mode
-        if dry_run:
-            settings.sync.dry_run = True
+        if dry_run is not None:
+            settings.sync.dry_run = dry_run
 
         try:
             settings.sync.validate_enabled_sources()
         except ValueError as error:
             console.print(f"[red]Error:[/red] {error}", style="bold")
             raise typer.Exit(1) from None
+
+        raindrop_token = _require_raindrop_token(settings)
 
         # Get X authentication token
         token = _get_x_token(settings)
@@ -318,6 +352,10 @@ def sync(
         table.add_row("Bookmarks Enabled", "Yes" if settings.sync.bookmarks.enabled else "No")
         if settings.sync.bookmarks.enabled:
             table.add_row("Bookmarks Collection ID", str(settings.sync.bookmarks.collection_id))
+            table.add_row(
+                "Bookmarks Collection Title",
+                settings.sync.bookmarks.collection_title or "(none)",
+            )
             table.add_row("Bookmarks Tags", ", ".join(settings.sync.bookmarks.tags) or "(none)")
             table.add_row("Bookmarks Link Mode", settings.sync.bookmarks.link_mode.value)
             table.add_row(
@@ -331,6 +369,10 @@ def sync(
         table.add_row("Likes Enabled", "Yes" if settings.sync.likes.enabled else "No")
         if settings.sync.likes.enabled:
             table.add_row("Likes Collection ID", str(settings.sync.likes.collection_id))
+            table.add_row(
+                "Likes Collection Title",
+                settings.sync.likes.collection_title or "(none)",
+            )
             table.add_row("Likes Tags", ", ".join(settings.sync.likes.tags) or "(none)")
             table.add_row("Likes Link Mode", settings.sync.likes.link_mode.value)
             table.add_row(
@@ -350,7 +392,7 @@ def sync(
             refresh_client_id=settings.x.client_id,
             refresh_client_secret=settings.x.client_secret,
         )
-        raindrop_client = RaindropClient(settings.raindrop.token)
+        raindrop_client = RaindropClient(raindrop_token)
         state = SyncState(settings.sync.state_path)
 
         # Create sync service
@@ -384,14 +426,17 @@ def sync(
             likes_enabled=settings.sync.likes.enabled,
         )
 
-        # Cleanup
-        x_client.close()
-        raindrop_client.close()
-
+    except typer.Exit:
+        raise
     except Exception as e:
         logger.exception("Sync failed")
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1) from None
+    finally:
+        if x_client is not None:
+            x_client.close()
+        if raindrop_client is not None:
+            raindrop_client.close()
 
 
 def _display_sync_result(
@@ -465,6 +510,7 @@ def x_login(
     """
     try:
         settings = load_settings(config_path)
+        configure_logging(settings.log_level)
 
         # Check if direct token is already configured
         if settings.x.has_direct_token():
@@ -524,6 +570,7 @@ def x_status(
     """Check X authentication status."""
     try:
         settings = load_settings(config_path)
+        configure_logging(settings.log_level)
 
         # Check for direct token
         if settings.x.has_direct_token():
@@ -596,6 +643,7 @@ def x_logout(
     """
     try:
         settings = load_settings(config_path)
+        configure_logging(settings.log_level)
 
         # Warn if using direct token
         if settings.x.has_direct_token():
@@ -640,12 +688,14 @@ def raindrop_collections(
     ] = None,
 ) -> None:
     """List available Raindrop.io collections."""
+    client: RaindropClient | None = None
     try:
         settings = load_settings(config_path)
+        configure_logging(settings.log_level)
+        raindrop_token = _require_raindrop_token(settings)
 
-        client = RaindropClient(settings.raindrop.token)
+        client = RaindropClient(raindrop_token)
         collections = client.list_collections()
-        client.close()
 
         table = Table(title="Raindrop.io Collections")
         table.add_column("ID", style="cyan", justify="right")
@@ -667,6 +717,9 @@ def raindrop_collections(
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1) from None
+    finally:
+        if client is not None:
+            client.close()
 
 
 # Config subcommands
@@ -724,6 +777,7 @@ def config_show(
     """Show current configuration (with secrets masked)."""
     try:
         settings = load_settings(config_path)
+        configure_logging(settings.log_level)
 
         table = Table(title="Current Configuration")
         table.add_column("Setting", style="cyan")
@@ -741,12 +795,18 @@ def config_show(
         table.add_row("Raindrop Token", "***" if settings.raindrop.token else "(not set)")
 
         # Sync settings
+        table.add_row("Log Level", settings.log_level)
+        table.add_row("Dry Run", str(settings.sync.dry_run))
         table.add_row("Bookmarks Enabled", str(settings.sync.bookmarks.enabled))
         table.add_row(
             "Bookmarks Collection ID",
             str(settings.sync.bookmarks.collection_id)
             if settings.sync.bookmarks.collection_id
             else "(not set)",
+        )
+        table.add_row(
+            "Bookmarks Collection Title",
+            settings.sync.bookmarks.collection_title or "(not set)",
         )
         table.add_row("Bookmarks Tags", ", ".join(settings.sync.bookmarks.tags) or "(none)")
         table.add_row("Bookmarks Remove from X", str(settings.sync.bookmarks.remove_from_x))
@@ -762,6 +822,10 @@ def config_show(
             str(settings.sync.likes.collection_id)
             if settings.sync.likes.collection_id
             else "(not set)",
+        )
+        table.add_row(
+            "Likes Collection Title",
+            settings.sync.likes.collection_title or "(not set)",
         )
         table.add_row("Likes Tags", ", ".join(settings.sync.likes.tags) or "(none)")
         table.add_row("Likes Remove from X", str(settings.sync.likes.remove_from_x))

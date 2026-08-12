@@ -6,9 +6,9 @@ This module tests the PKCE authentication helpers and token management.
 from __future__ import annotations
 
 import json
+import stat
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from x2raindrop_cli.x.auth_pkce import (
     OAuth2Token,
@@ -19,9 +19,6 @@ from x2raindrop_cli.x.auth_pkce import (
     load_token,
     save_token,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestGeneratePkceCodes:
@@ -259,3 +256,14 @@ class TestSaveLoadToken:
         save_token(sample_oauth_token, token_path)
 
         assert token_path.exists()
+
+    def test_save_token_sets_restrictive_permissions(
+        self, temp_dir: Path, sample_oauth_token: OAuth2Token
+    ) -> None:
+        """Test save_token writes the token file with mode 0o600."""
+        token_path = temp_dir / "token.json"
+
+        save_token(sample_oauth_token, token_path)
+
+        mode = stat.S_IMODE(token_path.stat().st_mode)
+        assert mode == 0o600

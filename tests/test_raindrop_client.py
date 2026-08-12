@@ -5,17 +5,9 @@ This module tests the Raindrop.io API client wrapper.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from tests.fakes import MockRaindropClient
 from x2raindrop_cli.models import RaindropCreateRequest
-from x2raindrop_cli.raindrop.client import (
-    MockRaindropClient,
-    RaindropCollection,
-    normalize_link,
-)
-
-if TYPE_CHECKING:
-    pass
+from x2raindrop_cli.raindrop.client import RaindropClient, RaindropCollection, normalize_link
 
 
 class TestRaindropCollection:
@@ -250,3 +242,39 @@ class TestRaindropCreateRequest:
         assert request.excerpt is None
         assert request.tags == []
         assert request.note is None
+
+
+class TestRaindropPayloadConversion:
+    """Tests for Raindrop create/bulk payload helpers."""
+
+    def test_bulk_payload_keeps_note_with_excerpt(self) -> None:
+        """Test bulk payload includes note even when excerpt is set."""
+        client = RaindropClient("test-token")
+        request = RaindropCreateRequest(
+            link="https://example.com/article",
+            title="Example",
+            excerpt="Tweet text",
+            tags=["x"],
+            collection_id=12345,
+            note="X Post: https://x.com/user/status/1",
+            source_tweet_id="1",
+        )
+
+        payload = client._request_to_bulk_payload(request)
+
+        assert payload["excerpt"] == "Tweet text"
+        assert payload["note"] == "X Post: https://x.com/user/status/1"
+
+    def test_create_kwargs_falls_back_to_note_without_excerpt(self) -> None:
+        """Test library create kwargs use note when excerpt is empty."""
+        client = RaindropClient("test-token")
+        request = RaindropCreateRequest(
+            link="https://example.com/article",
+            collection_id=12345,
+            note="Only a note",
+            source_tweet_id="1",
+        )
+
+        create_kwargs = client._request_to_create_kwargs(request)
+
+        assert create_kwargs["excerpt"] == "Only a note"

@@ -6,23 +6,17 @@ to Raindrop.io synchronization.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 
+from tests.fakes import MockRaindropClient, MockXClient
 from x2raindrop_cli.config import SourceSyncSettings, SyncSettings
 from x2raindrop_cli.models import BookmarkItem, BothBehavior, LinkMode
-from x2raindrop_cli.raindrop.client import MockRaindropClient
 from x2raindrop_cli.state import InMemoryState
 from x2raindrop_cli.sync.service import (
     SyncService,
     create_raindrop_requests,
     resolve_links,
 )
-from x2raindrop_cli.x.client import MockXClient
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestResolveLinks:
@@ -745,3 +739,57 @@ class TestSyncServiceIntegration:
         assert result2.bookmarks.newly_synced == 0
         assert result2.bookmarks.already_synced == 1
         assert len(mock_raindrop_client.created_raindrops) == 1  # Still just 1
+
+    def test_resolves_collection_title_to_id(
+        self,
+        mock_x_client: MockXClient,
+        mock_raindrop_client: MockRaindropClient,
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test sync resolves collection_title when collection_id is unset."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=None,
+                collection_title="My Collection",
+                tags=["x-bookmark"],
+            ),
+            likes=SourceSyncSettings(enabled=False),
+            dry_run=False,
+        )
+        service = SyncService(
+            x_client=mock_x_client,
+            raindrop_client=mock_raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        result = service.sync()
+
+        assert settings.bookmarks.collection_id == 100
+        assert result.bookmarks.newly_synced >= 1
+
+    def test_missing_collection_title_raises(
+        self,
+        mock_x_client: MockXClient,
+        mock_raindrop_client: MockRaindropClient,
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test sync fails clearly when collection title is not found."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=None,
+                collection_title="Does Not Exist",
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+        service = SyncService(
+            x_client=mock_x_client,
+            raindrop_client=mock_raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        with pytest.raises(ValueError, match="Does Not Exist"):
+            service.sync()

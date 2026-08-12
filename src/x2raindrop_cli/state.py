@@ -7,16 +7,13 @@ and liked posts have already been synced, enabling idempotent sync operations.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
 from x2raindrop_cli.models import PostSource, SyncedBookmark
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -103,7 +100,7 @@ class SyncState:
 
         data: dict[str, Any] = {
             "version": _STATE_VERSION,
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": datetime.now(UTC).isoformat(),
             "bookmarks": self._serialize_source(PostSource.BOOKMARKS),
             "likes": self._serialize_source(PostSource.LIKES),
         }
@@ -177,7 +174,7 @@ class SyncState:
         self._synced[source][tweet_id] = SyncedBookmark(
             tweet_id=tweet_id,
             raindrop_links=raindrop_links,
-            synced_at=datetime.now(),
+            synced_at=datetime.now(UTC),
             deleted_from_x=deleted_from_x,
         )
         self._dirty = True

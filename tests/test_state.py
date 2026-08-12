@@ -6,12 +6,8 @@ This module tests the local state store for tracking synced bookmarks.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from x2raindrop_cli.state import InMemoryState, SyncState
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestSyncState:
