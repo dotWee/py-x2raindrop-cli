@@ -129,6 +129,51 @@ class TestXClientParsing:
         assert bookmark.author_username == "alice"
         assert bookmark.permalink == "https://x.com/alice/status/12345"
 
+    def test_extract_external_urls_handles_null_entities(self) -> None:
+        """Test entities=None from XDK model_dump does not crash."""
+        from datetime import datetime, timedelta
+
+        from x2raindrop_cli.x.auth_pkce import OAuth2Token
+        from x2raindrop_cli.x.client import XClient
+
+        token = OAuth2Token(
+            access_token="test",
+            refresh_token=None,
+            token_type="bearer",
+            expires_at=datetime.now() + timedelta(hours=1),
+            scope="tweet.read",
+        )
+        client = XClient(token)
+        try:
+            urls = client._extract_external_urls(
+                {
+                    "id": "1",
+                    "text": "No links here",
+                    "entities": None,
+                }
+            )
+            assert urls == []
+
+            urls_from_text = client._extract_external_urls(
+                {
+                    "id": "2",
+                    "text": "See https://example.com/page",
+                    "entities": None,
+                }
+            )
+            assert urls_from_text == ["https://example.com/page"]
+
+            urls_null_list = client._extract_external_urls(
+                {
+                    "id": "3",
+                    "text": "See https://example.org/page",
+                    "entities": {"urls": None},
+                }
+            )
+            assert urls_null_list == ["https://example.org/page"]
+        finally:
+            client.close()
+
 
 class TestBookmarkItemParsing:
     """Tests for BookmarkItem creation and parsing logic."""

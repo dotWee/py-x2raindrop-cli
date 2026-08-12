@@ -329,12 +329,12 @@ class TestSyncService:
 
         service.sync(progress_callback=track_progress)
 
-        # 4 calls: 1 initial "Fetched bookmarks" + 3 for each synced bookmark
-        assert len(progress_calls) == 4
-        # First call is for fetching
+        # 5 calls: fetched + loading inventory + 3 synced bookmarks
+        assert len(progress_calls) == 5
         assert progress_calls[0][2] == "Fetched bookmarks from X"
+        assert "Loading existing Raindrop links" in progress_calls[1][2]
         # Check progress increases for sync calls
-        for i, (current, total, _) in enumerate(progress_calls[1:], start=1):
+        for i, (current, total, _) in enumerate(progress_calls[2:], start=1):
             assert current == i
             assert total == 3
 
@@ -407,6 +407,7 @@ class TestSyncService:
         assert result.bookmarks.total == 3
         assert result.bookmarks.newly_synced == 2
         assert result.bookmarks.already_synced == 1
+        assert raindrop_client.list_collection_links_calls == [100]
         created_links = [request.link for request in raindrop_client.created_raindrops]
         assert existing_link not in created_links
         assert in_memory_state.is_synced("2222222222")
@@ -433,8 +434,51 @@ class TestSyncService:
         assert result.bookmarks.total == 3
         assert result.bookmarks.newly_synced == 3
         assert result.bookmarks.already_synced == 0
+        assert raindrop_client.list_collection_links_calls == []
         created_links = [request.link for request in raindrop_client.created_raindrops]
         assert existing_link in created_links
+
+    def test_sync_reuses_link_inventory_across_sources(
+        self,
+        sample_bookmarks: list[BookmarkItem],
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test shared collection inventories are loaded once per sync run."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=100,
+                tags=["bookmark"],
+                remove_from_x=False,
+                skip_existing_links=True,
+                link_mode=LinkMode.PERMALINK,
+                both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+            ),
+            likes=SourceSyncSettings(
+                enabled=True,
+                collection_id=100,
+                tags=["like"],
+                remove_from_x=False,
+                skip_existing_links=True,
+                link_mode=LinkMode.PERMALINK,
+                both_behavior=BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
+            ),
+        )
+        raindrop_client = MockRaindropClient(existing_links=[])
+        x_client = MockXClient(
+            bookmarks=sample_bookmarks[:1],
+            liked_posts=sample_bookmarks[1:2],
+        )
+        service = SyncService(
+            x_client=x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        service.sync()
+
+        assert raindrop_client.list_collection_links_calls == [100]
 
 
 class TestSyncServiceLikes:

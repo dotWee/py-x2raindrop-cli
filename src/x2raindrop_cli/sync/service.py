@@ -22,7 +22,7 @@ from x2raindrop_cli.models import (
     SourceSyncResult,
     SyncResult,
 )
-from x2raindrop_cli.raindrop.client import RaindropClientProtocol
+from x2raindrop_cli.raindrop.client import RaindropClientProtocol, normalize_link
 from x2raindrop_cli.state import SyncState
 from x2raindrop_cli.x.client import XClientProtocol
 
@@ -149,6 +149,7 @@ class SyncService:
         self.raindrop_client = raindrop_client
         self.state = state
         self.settings = settings
+        self._collection_link_cache: dict[int, set[str]] = {}
 
     def sync(
         self,
@@ -165,6 +166,7 @@ class SyncService:
         result = SyncResult()
         self.settings.validate_enabled_sources()
         self.state.load()
+        self._collection_link_cache.clear()
 
         if self.settings.bookmarks.enabled:
             result.bookmarks = self._sync_source(
@@ -197,6 +199,24 @@ class SyncService:
 
         return result
 
+    def _existing_links_for(self, collection_id: int) -> set[str]:
+        """Load (and cache) normalized links already in a Raindrop collection."""
+        cached = self._collection_link_cache.get(collection_id)
+        if cached is not None:
+            return cached
+
+        links = self.raindrop_client.list_collection_links(collection_id)
+        self._collection_link_cache[collection_id] = links
+        return links
+
+    def _remember_created_links(self, collection_id: int, links: list[str]) -> None:
+        """Add newly created links to the in-run collection inventory cache."""
+        cached = self._collection_link_cache.get(collection_id)
+        if cached is None:
+            return
+        for link in links:
+            cached.add(normalize_link(link))
+
     def _sync_source(
         self,
         source: PostSource,
@@ -218,8 +238,25 @@ class SyncService:
 
         logger.info(f"Found {source_label}", count=source_result.total)
 
+        existing_links: set[str] | None = None
+        if source_settings.skip_existing_links:
+            if source_settings.collection_id is None:
+                raise ValueError("collection_id must be set when skip_existing_links is enabled")
+            if progress_callback:
+                progress_callback(
+                    0,
+                    source_result.total,
+                    f"Loading existing Raindrop links for {source_label}...",
+                )
+            existing_links = self._existing_links_for(source_settings.collection_id)
+            logger.info(
+                "Using Raindrop link inventory",
+                source=source.value,
+                collection_id=source_settings.collection_id,
+                existing_count=len(existing_links),
+            )
+
         pending_requests: list[tuple[int, BookmarkItem, list[RaindropCreateRequest]]] = []
-        checked_link_cache: dict[tuple[int, str], bool] = {}
 
         for idx, post in enumerate(posts):
             log = logger.bind(
@@ -247,10 +284,10 @@ class SyncService:
                 source_result.add_error(f"[{post.tweet_id}] {error}")
                 continue
 
-            if source_settings.skip_existing_links:
+            if existing_links is not None:
                 requests = self._filter_existing_requests(
                     requests=requests,
-                    checked_link_cache=checked_link_cache,
+                    existing_links=existing_links,
                 )
                 if not requests:
                     log.debug("Skipping post with links already in Raindrop")
@@ -274,6 +311,10 @@ class SyncService:
                     "Dry run - would create raindrop(s)",
                     links=[request.link for request in requests],
                 )
+                # Keep dry-run inventory consistent so later items aren't double-counted.
+                if existing_links is not None:
+                    for request in requests:
+                        existing_links.add(normalize_link(request.link))
                 source_result.newly_synced += 1
                 if progress_callback:
                     progress_callback(
@@ -299,22 +340,12 @@ class SyncService:
     def _filter_existing_requests(
         self,
         requests: list[RaindropCreateRequest],
-        checked_link_cache: dict[tuple[int, str], bool],
+        existing_links: set[str],
     ) -> list[RaindropCreateRequest]:
         """Filter out requests whose links already exist in Raindrop."""
-        filtered: list[RaindropCreateRequest] = []
-        for request in requests:
-            cache_key = (request.collection_id, request.link)
-            exists = checked_link_cache.get(cache_key)
-            if exists is None:
-                exists = self.raindrop_client.check_link_exists(
-                    request.link,
-                    collection_id=request.collection_id,
-                )
-                checked_link_cache[cache_key] = exists
-            if not exists:
-                filtered.append(request)
-        return filtered
+        return [
+            request for request in requests if normalize_link(request.link) not in existing_links
+        ]
 
     def _sync_pending_posts(
         self,
@@ -474,6 +505,8 @@ class SyncService:
             deleted_from_x,
             source=source,
         )
+        if source_settings.collection_id is not None:
+            self._remember_created_links(source_settings.collection_id, created_links)
         source_result.newly_synced += 1
         if progress_callback:
             progress_callback(

@@ -378,11 +378,18 @@ class XClient:
             List of external URLs.
         """
         external_urls: list[str] = []
-        entities = tweet.get("entities", {})
+        # XDK model_dump may include entities=None when the field was requested
+        # but the post has no entities object.
+        entities = tweet.get("entities") or {}
+        if not isinstance(entities, dict):
+            entities = {}
 
         # URLs from entities (preferred, has expanded URLs)
-        if "urls" in entities:
-            for url_entity in entities["urls"]:
+        url_entities = entities.get("urls") or []
+        if isinstance(url_entities, list):
+            for url_entity in url_entities:
+                if not isinstance(url_entity, dict):
+                    continue
                 # Use expanded_url if available, otherwise unwrapped_url
                 expanded = url_entity.get("expanded_url") or url_entity.get("unwrapped_url")
                 # Filter out t.co and X/Twitter internal URLs
@@ -395,7 +402,7 @@ class XClient:
 
         # Fallback: extract from text if no entity URLs
         if not external_urls:
-            text = tweet.get("text", "")
+            text = tweet.get("text") or ""
             matches = URL_PATTERN.findall(text)
             external_urls = [
                 url
