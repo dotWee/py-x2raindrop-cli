@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Generate release notes
         id: notes
@@ -77,6 +78,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -85,6 +89,10 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
+
+      - name: Resolve version from Git tag
+        run: |
+          echo "Resolved version: $(uvx uv-dynamic-versioning)"
 
       - name: Build package
         run: uv build
@@ -152,6 +160,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -190,6 +201,8 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
+          build-args: |
+            UV_DYNAMIC_VERSIONING_BYPASS=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -209,5 +222,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            UV_DYNAMIC_VERSIONING_BYPASS=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

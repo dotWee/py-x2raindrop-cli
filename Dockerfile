@@ -14,6 +14,11 @@ ENV UV_NO_DEV=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=0
 
+# Version comes from Git tags via uv-dynamic-versioning. Docker builds exclude
+# `.git`, so pass the release version as UV_DYNAMIC_VERSIONING_BYPASS.
+ARG UV_DYNAMIC_VERSIONING_BYPASS
+ENV UV_DYNAMIC_VERSIONING_BYPASS=${UV_DYNAMIC_VERSIONING_BYPASS}
+
 WORKDIR /app
 
 # Install dependencies first for better layer caching

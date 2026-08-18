@@ -1,6 +1,6 @@
 [project]
 name = "x2raindrop-cli"
-version = "1.0.5"
+dynamic = ["version"]
 description = "CLI tool to sync X (Twitter) Bookmarks to Raindrop.io"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -49,8 +49,19 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.27.0"]
+requires = ["hatchling>=1.27.0", "uv-dynamic-versioning>=0.14.0"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+fallback-version = "0.0.0"
 
 [tool.coverage.run]
 source = ["src/x2raindrop_cli"]

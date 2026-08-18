@@ -3,4 +3,9 @@
 A CLI tool to sync your X (Twitter) bookmarks to Raindrop.io collections.
 """
 
-__version__ = "1.0.5"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("x2raindrop-cli")
+except PackageNotFoundError:
+    __version__ = "0.0.0"

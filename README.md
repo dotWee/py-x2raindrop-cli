@@ -482,6 +482,20 @@ uv run ruff format src tests
 uv run ty check src
 ```
 
+### Preview the package version
+
+The package version is derived from Git tags via
+[uv-dynamic-versioning](https://github.com/ninoseki/uv-dynamic-versioning).
+Do not set `version` in `pyproject.toml`.
+
+```bash
+uvx uv-dynamic-versioning
+uv run x2raindrop --version
+```
+
+A tagged commit such as `v1.2.3` builds as `1.2.3`. Commits after a tag get a
+PEP 440 development version (for example `1.2.3.post1.dev0+abc1234`).
+
 ## Troubleshooting
 
 ### "Not authenticated with X"
@@ -518,3 +532,45 @@ Licensed under the Do What The Fuck You Want To Public License. See the [LICENSE
 
 - [python-raindropio](https://github.com/atsuoishimoto/python-raindropio) - Raindrop.io API wrapper
 - [X Python XDK](https://docs.x.com/xdks/python/quickstart) - X API documentation
+
+## Releasing
+
+Releases are driven by Git tags. Pushing a `v*.*.*` tag runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which creates
+the GitHub Release, publishes to PyPI, and pushes the Docker image to GHCR.
+
+1. Merge the changes you want to ship into `main`.
+2. Decide the next version from the latest tag (do not edit `pyproject.toml`):
+
+   ```bash
+   git fetch --tags
+   git tag --sort=-v:refname | head -n 1
+   uvx uv-dynamic-versioning
+   ```
+
+3. Create an annotated tag on `main` using a `v` prefix (required by the
+   default version pattern and the release workflow):
+
+   ```bash
+   git checkout main
+   git pull
+   git tag -a v1.2.3 -m "v1.2.3"
+   ```
+
+4. Push the tag:
+
+   ```bash
+   git push origin v1.2.3
+   ```
+
+5. Confirm the **Release & Publish** workflow succeeds. It will:
+   - Resolve the version from the tag with `uv-dynamic-versioning`
+   - Build the sdist and wheel with `uv build`
+   - Create a GitHub Release and attach the distributions
+   - Publish to PyPI
+   - Build and push `ghcr.io/dotwee/x2raindrop-cli` tagged with the SemVer
+     version and `latest`
+
+Docker images exclude `.git`, so the workflow passes
+`UV_DYNAMIC_VERSIONING_BYPASS` (the tag without the `v` prefix) into the image
+build. Local Docker builds without that build-arg fall back to `0.0.0`.
