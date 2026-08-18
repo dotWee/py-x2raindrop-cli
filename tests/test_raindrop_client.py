@@ -206,6 +206,21 @@ class TestMockRaindropClient:
         assert "https://created.example.com" in links
 
 
+class TestMockRaindropCreateCollection:
+    """Tests for mock collection creation."""
+
+    def test_create_collection_appends_child(self) -> None:
+        """Test create_collection tracks a nested collection."""
+        client = MockRaindropClient(collections=[])
+
+        created = client.create_collection("Test", 65746356)
+
+        assert created.title == "Test"
+        assert created.parent_id == 65746356
+        assert created in client.collections
+        assert created in client.created_collections
+
+
 class TestRaindropCreateRequest:
     """Tests for RaindropCreateRequest model."""
 

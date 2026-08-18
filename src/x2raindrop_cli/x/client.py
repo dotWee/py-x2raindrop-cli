@@ -16,7 +16,7 @@ from typing import Any, Protocol
 import structlog
 from xdk import Client as XdkClient
 
-from x2raindrop_cli.models import BookmarkItem
+from x2raindrop_cli.models import BookmarkFolder, BookmarkItem
 from x2raindrop_cli.x.auth_pkce import OAuth2Token, refresh_access_token
 
 logger = structlog.get_logger(__name__)
@@ -50,6 +50,25 @@ class XClientProtocol(Protocol):
 
         Yields:
             BookmarkItem for each liked post.
+        """
+        ...
+
+    def get_bookmark_folders(self) -> list[BookmarkFolder]:
+        """List X bookmark folders for the authenticated user.
+
+        Returns:
+            Bookmark folders with IDs and display names.
+        """
+        ...
+
+    def get_bookmark_ids_in_folder(self, folder_id: str) -> list[str]:
+        """List tweet IDs stored in an X bookmark folder.
+
+        Args:
+            folder_id: Bookmark folder ID.
+
+        Returns:
+            Tweet IDs in the folder.
         """
         ...
 
@@ -220,6 +239,100 @@ class XClient:
             source_label="liked posts",
             max_results=max_results,
         )
+
+    def get_bookmark_folders(self) -> list[BookmarkFolder]:
+        """List X bookmark folders for the authenticated user.
+
+        Returns:
+            Bookmark folders with IDs and display names.
+        """
+        self._ensure_fresh_token()
+        user_id = self.get_authenticated_user_id()
+        folders: list[BookmarkFolder] = []
+        page_count = 0
+
+        for page in self._x_client.users.get_bookmark_folders(
+            id=user_id,
+            max_results=MAX_RESULTS_PER_PAGE,
+        ):
+            page_count += 1
+            self._request_count += 1
+            data = self._model_to_dict(page)
+            items = data.get("data") or []
+            if not isinstance(items, list) or not items:
+                break
+            for item in items:
+                folder = self._parse_folder(item)
+                if folder is not None:
+                    folders.append(folder)
+
+        logger.info(
+            "Fetched bookmark folders",
+            total=len(folders),
+            pages_fetched=page_count,
+            api_requests=self._request_count,
+        )
+        return folders
+
+    def get_bookmark_ids_in_folder(self, folder_id: str) -> list[str]:
+        """List tweet IDs stored in an X bookmark folder.
+
+        Args:
+            folder_id: Bookmark folder ID.
+
+        Returns:
+            Tweet IDs in the folder.
+        """
+        self._ensure_fresh_token()
+        user_id = self.get_authenticated_user_id()
+        tweet_ids: list[str] = []
+        page_count = 0
+
+        for page in self._x_client.users.get_bookmarks_by_folder_id(
+            id=user_id,
+            folder_id=folder_id,
+            max_results=MAX_RESULTS_PER_PAGE,
+        ):
+            page_count += 1
+            self._request_count += 1
+            data = self._model_to_dict(page)
+            items = data.get("data") or []
+            if not isinstance(items, list) or not items:
+                break
+            for item in items:
+                tweet_id = self._extract_item_id(item)
+                if tweet_id:
+                    tweet_ids.append(tweet_id)
+
+        logger.info(
+            "Fetched bookmarks in folder",
+            folder_id=folder_id,
+            total=len(tweet_ids),
+            pages_fetched=page_count,
+            api_requests=self._request_count,
+        )
+        return tweet_ids
+
+    def _parse_folder(self, item: Any) -> BookmarkFolder | None:
+        """Parse a bookmark folder object from an XDK response item."""
+        data = self._model_to_dict(item) if not isinstance(item, dict) else item
+        folder_id = data.get("id")
+        name = data.get("name")
+        if folder_id is None or not isinstance(name, str) or not name.strip():
+            return None
+        return BookmarkFolder(id=str(folder_id), name=name.strip())
+
+    def _extract_item_id(self, item: Any) -> str | None:
+        """Extract an ID string from a folder-post response item."""
+        if isinstance(item, dict):
+            raw_id = item.get("id")
+        else:
+            raw_id = getattr(item, "id", None)
+            if raw_id is None:
+                raw_id = self._model_to_dict(item).get("id")
+        if raw_id is None:
+            return None
+        return str(raw_id)
 
     def _fetch_posts(
         self,

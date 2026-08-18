@@ -197,6 +197,8 @@ class SourceSyncSettings(BaseModel):
         skip_existing_links: Whether to skip links that already exist in Raindrop.
         link_mode: How to determine the Raindrop link.
         both_behavior: Behavior when link_mode is 'both'.
+        map_folders_to_subcollections: For bookmarks, map X folders to Raindrop
+            child collections under the configured parent collection.
     """
 
     enabled: bool = Field(True, description="Whether this source is synced")
@@ -212,6 +214,12 @@ class SourceSyncSettings(BaseModel):
     both_behavior: BothBehavior = Field(
         BothBehavior.ONE_EXTERNAL_PLUS_NOTE,
         description="Behavior when link_mode is 'both'",
+    )
+    map_folders_to_subcollections: bool = Field(
+        False,
+        description=(
+            "Map X bookmark folders to Raindrop subcollections under the parent collection"
+        ),
     )
 
     @field_validator("tags", mode="before")
@@ -309,6 +317,16 @@ class SyncSettings(BaseSettings):
             )
         if not self.any_enabled():
             raise ValueError("At least one sync source (bookmarks or likes) must be enabled")
+        if (
+            self.bookmarks.enabled
+            and self.bookmarks.map_folders_to_subcollections
+            and self.bookmarks.collection_id is not None
+            and self.bookmarks.collection_id <= 0
+        ):
+            raise ValueError(
+                "map_folders_to_subcollections requires a regular Raindrop collection "
+                "(not 0/All, -1/Unsorted, or -99/Trash)"
+            )
 
 
 class Settings(BaseSettings):
@@ -448,6 +466,7 @@ def create_default_config(path: Path | None = None) -> Path:
                 "skip_existing_links": True,
                 "link_mode": "permalink",
                 "both_behavior": "one_external_plus_note",
+                "map_folders_to_subcollections": False,
             },
             "likes": {
                 "enabled": False,

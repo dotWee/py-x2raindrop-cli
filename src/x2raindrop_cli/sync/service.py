@@ -80,17 +80,20 @@ def resolve_links(
 def create_raindrop_requests(
     bookmark: BookmarkItem,
     settings: SourceSyncSettings,
+    collection_id: int | None = None,
 ) -> list[RaindropCreateRequest]:
     """Create Raindrop request(s) from a bookmark or liked post.
 
     Args:
         bookmark: X post to convert.
         settings: Source-specific sync settings.
+        collection_id: Optional collection override (e.g. a folder subcollection).
 
     Returns:
         List of RaindropCreateRequest objects.
     """
-    if settings.collection_id is None:
+    target_collection_id = collection_id if collection_id is not None else settings.collection_id
+    if target_collection_id is None:
         raise ValueError("collection_id must be set in sync settings")
 
     links = resolve_links(bookmark, settings.link_mode, settings.both_behavior)
@@ -106,7 +109,7 @@ def create_raindrop_requests(
                 title=title,
                 excerpt=excerpt,
                 tags=list(settings.tags),
-                collection_id=settings.collection_id,
+                collection_id=target_collection_id,
                 note=note,
                 source_tweet_id=bookmark.tweet_id,
             )
@@ -182,6 +185,24 @@ class SyncService:
             )
             source_settings.collection_id = collection.id
 
+        self._validate_folder_mapping()
+
+    def _validate_folder_mapping(self) -> None:
+        """Require a regular parent collection when mapping X folders.
+
+        Raises:
+            ValueError: If folder mapping is enabled without a usable parent.
+        """
+        bookmarks = self.settings.bookmarks
+        if not bookmarks.enabled or not bookmarks.map_folders_to_subcollections:
+            return
+        collection_id = bookmarks.collection_id
+        if collection_id is None or collection_id <= 0:
+            raise ValueError(
+                "map_folders_to_subcollections requires a regular Raindrop collection "
+                "(not 0/All, -1/Unsorted, or -99/Trash)"
+            )
+
     def sync(
         self,
         progress_callback: ProgressCallback | None = None,
@@ -207,6 +228,7 @@ class SyncService:
                 fetch_items=self.x_client.get_bookmarks,
                 remove_from_x=self.x_client.delete_bookmark,
                 progress_callback=progress_callback,
+                map_folders=self.settings.bookmarks.map_folders_to_subcollections,
             )
 
         if self.settings.likes.enabled:
@@ -256,6 +278,7 @@ class SyncService:
         fetch_items: Callable[[], Iterator[BookmarkItem]],
         remove_from_x: Callable[[str], bool],
         progress_callback: ProgressCallback | None,
+        map_folders: bool = False,
     ) -> SourceSyncResult:
         """Sync one X post source to Raindrop."""
         source_result = SourceSyncResult()
@@ -263,6 +286,10 @@ class SyncService:
 
         logger.info(f"Fetching {source_label} from X...")
         posts = list(fetch_items())
+        if map_folders:
+            if progress_callback:
+                progress_callback(0, len(posts), "Mapping X bookmark folders...")
+            posts = self._apply_bookmark_folders(posts)
         source_result.total = len(posts)
 
         if progress_callback:
@@ -270,22 +297,17 @@ class SyncService:
 
         logger.info(f"Found {source_label}", count=source_result.total)
 
-        existing_links: set[str] | None = None
-        if source_settings.skip_existing_links:
-            if source_settings.collection_id is None:
-                raise ValueError("collection_id must be set when skip_existing_links is enabled")
-            if progress_callback:
-                progress_callback(
-                    0,
-                    source_result.total,
-                    f"Loading existing Raindrop links for {source_label}...",
-                )
-            existing_links = self._existing_links_for(source_settings.collection_id)
-            logger.info(
-                "Using Raindrop link inventory",
-                source=source.value,
-                collection_id=source_settings.collection_id,
-                existing_count=len(existing_links),
+        folder_collection_ids = self._resolve_folder_subcollections(
+            posts=posts,
+            source_settings=source_settings,
+            map_folders=map_folders,
+        )
+
+        if source_settings.skip_existing_links and progress_callback:
+            progress_callback(
+                0,
+                source_result.total,
+                f"Loading existing Raindrop links for {source_label}...",
             )
 
         pending_requests: list[tuple[int, BookmarkItem, list[RaindropCreateRequest]]] = []
@@ -294,6 +316,7 @@ class SyncService:
             log = logger.bind(
                 tweet_id=post.tweet_id,
                 source=source.value,
+                folder=post.folder_name,
                 progress=f"{idx + 1}/{source_result.total}",
             )
 
@@ -308,15 +331,39 @@ class SyncService:
                     )
                 continue
 
+            target_collection_id = self._target_collection_id(
+                post=post,
+                source_settings=source_settings,
+                folder_collection_ids=folder_collection_ids,
+            )
+            if target_collection_id is None:
+                log.info(
+                    "Dry run - would create subcollection and raindrop(s)",
+                    folder=post.folder_name,
+                )
+                source_result.newly_synced += 1
+                if progress_callback:
+                    progress_callback(
+                        idx + 1,
+                        source_result.total,
+                        f"Dry run (would create folder): {post.folder_name}",
+                    )
+                continue
+
             try:
-                requests = create_raindrop_requests(post, source_settings)
+                requests = create_raindrop_requests(
+                    post,
+                    source_settings,
+                    collection_id=target_collection_id,
+                )
             except ValueError as error:
                 log.error("Failed to create request", error=str(error))
                 source_result.failed += 1
                 source_result.add_error(f"[{post.tweet_id}] {error}")
                 continue
 
-            if existing_links is not None:
+            if source_settings.skip_existing_links:
+                existing_links = self._existing_links_for(target_collection_id)
                 requests = self._filter_existing_requests(
                     requests=requests,
                     existing_links=existing_links,
@@ -342,11 +389,14 @@ class SyncService:
                 log.info(
                     "Dry run - would create raindrop(s)",
                     links=[request.link for request in requests],
+                    collection_id=target_collection_id,
+                    folder=post.folder_name,
                 )
-                # Keep dry-run inventory consistent so later items aren't double-counted.
-                if existing_links is not None:
-                    for request in requests:
-                        existing_links.add(normalize_link(request.link))
+                if source_settings.skip_existing_links:
+                    self._remember_created_links(
+                        target_collection_id,
+                        [request.link for request in requests],
+                    )
                 source_result.newly_synced += 1
                 if progress_callback:
                     progress_callback(
@@ -368,6 +418,127 @@ class SyncService:
         )
 
         return source_result
+
+    def _apply_bookmark_folders(self, posts: list[BookmarkItem]) -> list[BookmarkItem]:
+        """Annotate bookmarks with their X folder names.
+
+        Posts that appear only in a folder (not in the main bookmarks list)
+        are added as permalink-only items so folder contents are not dropped.
+        """
+        folders = self.x_client.get_bookmark_folders()
+        tweet_to_folder: dict[str, str] = {}
+        for folder in folders:
+            for tweet_id in self.x_client.get_bookmark_ids_in_folder(folder.id):
+                existing_folder = tweet_to_folder.get(tweet_id)
+                if existing_folder and existing_folder != folder.name:
+                    logger.warning(
+                        "Bookmark is in multiple X folders; using the first folder",
+                        tweet_id=tweet_id,
+                        first_folder=existing_folder,
+                        ignored_folder=folder.name,
+                    )
+                    continue
+                tweet_to_folder[tweet_id] = folder.name
+
+        annotated = [
+            post.model_copy(update={"folder_name": tweet_to_folder.get(post.tweet_id)})
+            for post in posts
+        ]
+        known_ids = {post.tweet_id for post in annotated}
+        for tweet_id, folder_name in tweet_to_folder.items():
+            if tweet_id in known_ids:
+                continue
+            annotated.append(
+                BookmarkItem(
+                    tweet_id=tweet_id,
+                    text="",
+                    permalink=f"https://x.com/i/status/{tweet_id}",
+                    folder_name=folder_name,
+                )
+            )
+
+        logger.info(
+            "Mapped X bookmark folders",
+            folder_count=len(folders),
+            filed_count=sum(1 for post in annotated if post.folder_name),
+            unfiled_count=sum(1 for post in annotated if not post.folder_name),
+        )
+        return annotated
+
+    def _resolve_folder_subcollections(
+        self,
+        posts: list[BookmarkItem],
+        source_settings: SourceSyncSettings,
+        map_folders: bool,
+    ) -> dict[str, int]:
+        """Find or create Raindrop subcollections for X bookmark folders.
+
+        Returns:
+            Mapping of folder display name to Raindrop collection ID.
+        """
+        if not map_folders:
+            return {}
+        if source_settings.collection_id is None:
+            raise ValueError("collection_id must be set when mapping folders")
+
+        parent_id = source_settings.collection_id
+        folder_names = sorted({post.folder_name for post in posts if post.folder_name})
+        if not folder_names:
+            return {}
+
+        collections = self.raindrop_client.list_collections()
+        children_by_title = {
+            collection.title.lower(): collection
+            for collection in collections
+            if collection.parent_id == parent_id
+        }
+
+        mapping: dict[str, int] = {}
+        for folder_name in folder_names:
+            existing = children_by_title.get(folder_name.lower())
+            if existing is not None:
+                mapping[folder_name] = existing.id
+                logger.info(
+                    "Using existing Raindrop subcollection for X folder",
+                    folder=folder_name,
+                    collection_id=existing.id,
+                    parent_id=parent_id,
+                )
+                continue
+            if self.settings.dry_run:
+                logger.info(
+                    "Dry run - would create Raindrop subcollection",
+                    folder=folder_name,
+                    parent_id=parent_id,
+                )
+                continue
+            created = self.raindrop_client.create_collection(folder_name, parent_id)
+            children_by_title[folder_name.lower()] = created
+            mapping[folder_name] = created.id
+
+        return mapping
+
+    def _target_collection_id(
+        self,
+        post: BookmarkItem,
+        source_settings: SourceSyncSettings,
+        folder_collection_ids: dict[str, int],
+    ) -> int | None:
+        """Return the Raindrop collection ID for a post.
+
+        Returns:
+            Collection ID, or None when a dry-run would still need to create
+            the destination subcollection.
+        """
+        if post.folder_name:
+            mapped_id = folder_collection_ids.get(post.folder_name)
+            if mapped_id is not None:
+                return mapped_id
+            if self.settings.dry_run:
+                return None
+        if source_settings.collection_id is None:
+            raise ValueError("collection_id must be set in sync settings")
+        return source_settings.collection_id
 
     def _filter_existing_requests(
         self,
@@ -445,6 +616,7 @@ class SyncService:
                 source_settings=source_settings,
                 idx=idx,
                 post=post,
+                post_requests=post_requests,
                 created_links=post_links,
                 source_result=source_result,
                 remove_from_x=remove_from_x,
@@ -491,6 +663,7 @@ class SyncService:
                 source_settings=source_settings,
                 idx=idx,
                 post=post,
+                post_requests=post_requests,
                 created_links=created_links,
                 source_result=source_result,
                 remove_from_x=remove_from_x,
@@ -503,6 +676,7 @@ class SyncService:
         source_settings: SourceSyncSettings,
         idx: int,
         post: BookmarkItem,
+        post_requests: list[RaindropCreateRequest],
         created_links: list[str],
         source_result: SourceSyncResult,
         remove_from_x: Callable[[str], bool],
@@ -537,8 +711,8 @@ class SyncService:
             deleted_from_x,
             source=source,
         )
-        if source_settings.collection_id is not None:
-            self._remember_created_links(source_settings.collection_id, created_links)
+        for request, link in zip(post_requests, created_links, strict=True):
+            self._remember_created_links(request.collection_id, [link])
         source_result.newly_synced += 1
         if progress_callback:
             progress_callback(

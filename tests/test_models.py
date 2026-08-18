@@ -10,6 +10,7 @@ from datetime import datetime
 import pytest
 
 from x2raindrop_cli.models import (
+    BookmarkFolder,
     BookmarkItem,
     BothBehavior,
     LinkMode,
@@ -74,6 +75,7 @@ class TestBookmarkItem:
         assert bookmark.author_name == "Test User"
         assert bookmark.permalink == "https://x.com/testuser/status/12345"
         assert bookmark.external_urls == ["https://example.com"]
+        assert bookmark.folder_name is None
 
     def test_create_minimal(self) -> None:
         """Test creating BookmarkItem with minimal fields."""
@@ -122,6 +124,28 @@ class TestBookmarkItem:
 
         with pytest.raises(ValidationError):
             sample_bookmark.tweet_id = "new_id"  # type: ignore
+
+    def test_folder_name_optional(self) -> None:
+        """Test folder_name can be set on a bookmark."""
+        bookmark = BookmarkItem(
+            tweet_id="12345",
+            text="Filed tweet",
+            permalink="https://x.com/i/status/12345",
+            folder_name="Test",
+        )
+
+        assert bookmark.folder_name == "Test"
+
+
+class TestBookmarkFolder:
+    """Tests for BookmarkFolder model."""
+
+    def test_create(self) -> None:
+        """Test creating a bookmark folder."""
+        folder = BookmarkFolder(id="folder-1", name="Test")
+
+        assert folder.id == "folder-1"
+        assert folder.name == "Test"
 
 
 class TestRaindropCreateRequest:

@@ -51,6 +51,20 @@ class BothBehavior(StrEnum):
     TWO_RAINDROPS = "two_raindrops"
 
 
+class BookmarkFolder(BaseModel):
+    """Represents an X bookmark folder.
+
+    Attributes:
+        id: Unique folder identifier from the X API.
+        name: Display name of the folder.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str = Field(..., description="Unique bookmark folder identifier")
+    name: str = Field(..., description="Bookmark folder display name")
+
+
 class BookmarkItem(BaseModel):
     """Represents a bookmark from X (Twitter).
 
@@ -62,6 +76,7 @@ class BookmarkItem(BaseModel):
         created_at: When the tweet was created.
         permalink: The direct URL to the tweet.
         external_urls: List of external URLs found in the tweet.
+        folder_name: X bookmark folder name, if the post is filed in a folder.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -73,6 +88,10 @@ class BookmarkItem(BaseModel):
     created_at: datetime | None = Field(None, description="Tweet creation timestamp")
     permalink: str = Field(..., description="Direct URL to the tweet")
     external_urls: list[str] = Field(default_factory=list, description="External URLs in tweet")
+    folder_name: str | None = Field(
+        None,
+        description="X bookmark folder name when the post is filed in a folder",
+    )
 
     def get_title(self) -> str:
         """Generate a title for the bookmark.
