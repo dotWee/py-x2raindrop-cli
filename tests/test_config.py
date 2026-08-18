@@ -161,6 +161,7 @@ class TestSourceSyncSettings:
         assert settings.skip_existing_links is True
         assert settings.link_mode == LinkMode.PERMALINK
         assert settings.both_behavior == BothBehavior.ONE_EXTERNAL_PLUS_NOTE
+        assert settings.map_folders_to_subcollections is False
 
     def test_parse_tags_from_string(self) -> None:
         """Test parsing tags from comma-separated string."""
@@ -260,6 +261,20 @@ class TestSyncSettings:
         )
 
         settings.validate_enabled_sources()
+
+    def test_validate_folder_mapping_rejects_unsorted(self) -> None:
+        """Test folder mapping rejects Unsorted as the parent collection."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=-1,
+                map_folders_to_subcollections=True,
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+
+        with pytest.raises(ValueError, match="map_folders_to_subcollections"):
+            settings.validate_enabled_sources()
 
 
 class TestRaindropSettings:

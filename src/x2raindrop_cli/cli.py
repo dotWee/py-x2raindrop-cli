@@ -244,6 +244,13 @@ def sync(
             help="Skip links already present in the target Raindrop collection",
         ),
     ] = None,
+    map_folders_to_subcollections: Annotated[
+        bool | None,
+        typer.Option(
+            "--map-folders-to-subcollections/--no-map-folders-to-subcollections",
+            help="Map X bookmark folders to Raindrop subcollections",
+        ),
+    ] = None,
     link_mode: Annotated[
         LinkMode | None,
         typer.Option(
@@ -295,6 +302,8 @@ def sync(
                 settings.sync.bookmarks.skip_existing_links = skip_existing_links
             if settings.sync.likes.enabled:
                 settings.sync.likes.skip_existing_links = skip_existing_links
+        if map_folders_to_subcollections is not None:
+            settings.sync.bookmarks.map_folders_to_subcollections = map_folders_to_subcollections
         if link_mode is not None:
             if settings.sync.bookmarks.enabled:
                 settings.sync.bookmarks.link_mode = link_mode
@@ -365,6 +374,10 @@ def sync(
             table.add_row(
                 "Bookmarks Skip Existing Links",
                 "Yes" if settings.sync.bookmarks.skip_existing_links else "No",
+            )
+            table.add_row(
+                "Map Folders to Subcollections",
+                "Yes" if settings.sync.bookmarks.map_folders_to_subcollections else "No",
             )
         table.add_row("Likes Enabled", "Yes" if settings.sync.likes.enabled else "No")
         if settings.sync.likes.enabled:
@@ -816,6 +829,10 @@ def config_show(
         )
         table.add_row("Bookmarks Link Mode", settings.sync.bookmarks.link_mode.value)
         table.add_row("Bookmarks Both Behavior", settings.sync.bookmarks.both_behavior.value)
+        table.add_row(
+            "Map Folders to Subcollections",
+            str(settings.sync.bookmarks.map_folders_to_subcollections),
+        )
         table.add_row("Likes Enabled", str(settings.sync.likes.enabled))
         table.add_row(
             "Likes Collection ID",

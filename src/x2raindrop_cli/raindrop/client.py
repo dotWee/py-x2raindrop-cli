@@ -125,6 +125,18 @@ class RaindropClientProtocol(Protocol):
         """
         ...
 
+    def create_collection(self, title: str, parent_id: int) -> RaindropCollection:
+        """Create a child collection under a parent collection.
+
+        Args:
+            title: Collection title.
+            parent_id: Parent collection ID.
+
+        Returns:
+            Created collection details.
+        """
+        ...
+
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
         """Check if a link already exists in Raindrop.
 
@@ -224,6 +236,52 @@ class RaindropClient:
 
         logger.debug("Listed collections", count=len(collections))
         return collections
+
+    def create_collection(self, title: str, parent_id: int) -> RaindropCollection:
+        """Create a child collection under a parent collection.
+
+        Uses the REST create endpoint so ``parent.$id`` is sent in the
+        documented shape (the python-raindropio helper sends a bare integer).
+
+        Args:
+            title: Collection title.
+            parent_id: Parent collection ID.
+
+        Returns:
+            Created collection details.
+
+        Raises:
+            ValueError: If the API response is missing a collection ID.
+        """
+        create_url = "https://api.raindrop.io/rest/v1/collection"
+        payload = {"title": title, "parent": {"$id": parent_id}}
+        logger.debug("Creating collection", title=title, parent_id=parent_id)
+        response = self.api.post(create_url, json=payload)
+        response.raise_for_status()
+        response_data = response.json()
+        item = response_data.get("item", {})
+        if not isinstance(item, dict):
+            raise ValueError("Unexpected collection create response: item is not an object")
+
+        item_id = item.get("_id")
+        if item_id is None:
+            item_id = item.get("id")
+        if item_id is None:
+            raise ValueError("Unexpected collection create response: missing collection id")
+
+        created = RaindropCollection(
+            id=int(item_id),
+            title=str(item.get("title") or title),
+            count=int(item.get("count") or 0),
+            parent_id=parent_id,
+        )
+        logger.info(
+            "Created collection",
+            collection_id=created.id,
+            title=created.title,
+            parent_id=parent_id,
+        )
+        return created
 
     def get_collection_by_title(self, title: str) -> RaindropCollection | None:
         """Find a collection by its title.

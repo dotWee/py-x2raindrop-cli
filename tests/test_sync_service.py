@@ -163,6 +163,18 @@ class TestCreateRaindropRequests:
         with pytest.raises(ValueError, match="collection_id must be set"):
             create_raindrop_requests(sample_bookmark, settings)
 
+    def test_collection_id_override(
+        self, sample_bookmark: BookmarkItem, sync_settings: SyncSettings
+    ) -> None:
+        """Test an explicit collection ID overrides source settings."""
+        requests = create_raindrop_requests(
+            sample_bookmark,
+            sync_settings.bookmarks,
+            collection_id=999,
+        )
+
+        assert requests[0].collection_id == 999
+
 
 class TestSyncService:
     """Tests for SyncService orchestration."""
@@ -792,4 +804,243 @@ class TestSyncServiceIntegration:
         )
 
         with pytest.raises(ValueError, match="Does Not Exist"):
+            service.sync()
+
+
+class TestMapFoldersToSubcollections:
+    """Tests for mapping X bookmark folders to Raindrop subcollections."""
+
+    def test_uses_existing_subcollection(
+        self,
+        sample_bookmarks: list[BookmarkItem],
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test bookmarks in an X folder go to a matching Raindrop child collection."""
+        from x2raindrop_cli.models import BookmarkFolder
+        from x2raindrop_cli.raindrop.client import RaindropCollection
+
+        filed = sample_bookmarks[0]
+        unfiled = sample_bookmarks[1]
+        x_client = MockXClient(
+            bookmarks=[filed, unfiled],
+            bookmark_folders=[BookmarkFolder(id="folder-test", name="Test")],
+            folder_bookmark_ids={"folder-test": [filed.tweet_id]},
+        )
+        raindrop_client = MockRaindropClient(
+            collections=[
+                RaindropCollection(id=65746356, title="x.com", count=0),
+                RaindropCollection(id=111, title="Test", count=0, parent_id=65746356),
+            ]
+        )
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=65746356,
+                tags=["x-bookmark"],
+                map_folders_to_subcollections=True,
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+        service = SyncService(
+            x_client=x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        result = service.sync()
+
+        assert result.bookmarks.newly_synced == 2
+        assert raindrop_client.created_collections == []
+        by_tweet = {
+            request.source_tweet_id: request for request in raindrop_client.created_raindrops
+        }
+        assert by_tweet[filed.tweet_id].collection_id == 111
+        assert by_tweet[unfiled.tweet_id].collection_id == 65746356
+
+    def test_ignores_same_named_collection_outside_parent(
+        self,
+        sample_bookmarks: list[BookmarkItem],
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test a same-named collection is only reused when it is a child."""
+        from x2raindrop_cli.models import BookmarkFolder
+        from x2raindrop_cli.raindrop.client import RaindropCollection
+
+        filed = sample_bookmarks[0]
+        x_client = MockXClient(
+            bookmarks=[filed],
+            bookmark_folders=[BookmarkFolder(id="folder-test", name="Test")],
+            folder_bookmark_ids={"folder-test": [filed.tweet_id]},
+        )
+        raindrop_client = MockRaindropClient(
+            collections=[
+                RaindropCollection(id=65746356, title="x.com", count=0),
+                RaindropCollection(id=222, title="Test", count=0, parent_id=None),
+            ]
+        )
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=65746356,
+                map_folders_to_subcollections=True,
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+        service = SyncService(
+            x_client=x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        result = service.sync()
+
+        assert result.bookmarks.newly_synced == 1
+        assert len(raindrop_client.created_collections) == 1
+        assert raindrop_client.created_collections[0].parent_id == 65746356
+        assert raindrop_client.created_raindrops[0].collection_id != 222
+
+    def test_creates_missing_subcollection(
+        self,
+        sample_bookmarks: list[BookmarkItem],
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test a missing Raindrop child collection is created for the X folder."""
+        from x2raindrop_cli.models import BookmarkFolder
+        from x2raindrop_cli.raindrop.client import RaindropCollection
+
+        filed = sample_bookmarks[0]
+        x_client = MockXClient(
+            bookmarks=[filed],
+            bookmark_folders=[BookmarkFolder(id="folder-test", name="Test")],
+            folder_bookmark_ids={"folder-test": [filed.tweet_id]},
+        )
+        raindrop_client = MockRaindropClient(
+            collections=[RaindropCollection(id=65746356, title="x.com", count=0)]
+        )
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=65746356,
+                tags=["x-bookmark"],
+                map_folders_to_subcollections=True,
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+        service = SyncService(
+            x_client=x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        result = service.sync()
+
+        assert result.bookmarks.newly_synced == 1
+        assert len(raindrop_client.created_collections) == 1
+        created = raindrop_client.created_collections[0]
+        assert created.title == "Test"
+        assert created.parent_id == 65746356
+        assert raindrop_client.created_raindrops[0].collection_id == created.id
+
+    def test_dry_run_does_not_create_subcollection(
+        self,
+        sample_bookmarks: list[BookmarkItem],
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test dry-run does not create missing Raindrop subcollections."""
+        from x2raindrop_cli.models import BookmarkFolder
+        from x2raindrop_cli.raindrop.client import RaindropCollection
+
+        filed = sample_bookmarks[0]
+        x_client = MockXClient(
+            bookmarks=[filed],
+            bookmark_folders=[BookmarkFolder(id="folder-test", name="Test")],
+            folder_bookmark_ids={"folder-test": [filed.tweet_id]},
+        )
+        raindrop_client = MockRaindropClient(
+            collections=[RaindropCollection(id=65746356, title="x.com", count=0)]
+        )
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=65746356,
+                map_folders_to_subcollections=True,
+            ),
+            likes=SourceSyncSettings(enabled=False),
+            dry_run=True,
+        )
+        service = SyncService(
+            x_client=x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        result = service.sync()
+
+        assert result.bookmarks.newly_synced == 1
+        assert raindrop_client.created_collections == []
+        assert raindrop_client.created_raindrops == []
+
+    def test_includes_folder_only_bookmarks(
+        self,
+        in_memory_state: InMemoryState,
+    ) -> None:
+        """Test tweets present only in a folder are still synced."""
+        from x2raindrop_cli.models import BookmarkFolder
+        from x2raindrop_cli.raindrop.client import RaindropCollection
+
+        x_client = MockXClient(
+            bookmarks=[],
+            bookmark_folders=[BookmarkFolder(id="folder-test", name="Test")],
+            folder_bookmark_ids={"folder-test": ["9999999999"]},
+        )
+        raindrop_client = MockRaindropClient(
+            collections=[
+                RaindropCollection(id=65746356, title="x.com", count=0),
+                RaindropCollection(id=111, title="Test", count=0, parent_id=65746356),
+            ]
+        )
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=65746356,
+                map_folders_to_subcollections=True,
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+        service = SyncService(
+            x_client=x_client,
+            raindrop_client=raindrop_client,
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        result = service.sync()
+
+        assert result.bookmarks.total == 1
+        assert result.bookmarks.newly_synced == 1
+        assert raindrop_client.created_raindrops[0].collection_id == 111
+        assert raindrop_client.created_raindrops[0].source_tweet_id == "9999999999"
+
+    def test_rejects_unsorted_parent_collection(self, in_memory_state: InMemoryState) -> None:
+        """Test folder mapping requires a regular Raindrop collection."""
+        settings = SyncSettings(
+            bookmarks=SourceSyncSettings(
+                enabled=True,
+                collection_id=-1,
+                map_folders_to_subcollections=True,
+            ),
+            likes=SourceSyncSettings(enabled=False),
+        )
+        service = SyncService(
+            x_client=MockXClient(),
+            raindrop_client=MockRaindropClient(),
+            state=in_memory_state,
+            settings=settings,
+        )
+
+        with pytest.raises(ValueError, match="map_folders_to_subcollections"):
             service.sync()

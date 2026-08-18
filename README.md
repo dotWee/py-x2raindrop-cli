@@ -10,6 +10,7 @@ A Python CLI tool to sync your X (Twitter) bookmarks and liked posts to Raindrop
 ## Features
 
 - Sync X bookmarks and/or liked posts to Raindrop.io collections
+- Optional: map X bookmark folders to Raindrop subcollections under the parent collection
 - Per-source configuration: separate collections, tags, link modes, and remove-from-X settings
 - Configurable link handling:
   - Use X post permalink
@@ -284,6 +285,7 @@ remove_from_x = false
 skip_existing_links = true
 link_mode = "permalink"  # permalink, first_external_url, or both
 both_behavior = "one_external_plus_note"  # one_external_plus_note or two_raindrops
+map_folders_to_subcollections = false  # Map X bookmark folders to Raindrop child collections
 
 [sync.likes]
 enabled = false
@@ -303,6 +305,13 @@ supported and are treated as bookmark settings for backward compatibility.
 
 Each source can be configured independently: different Raindrop collections,
 tags, link modes, and remove-from-X behavior.
+
+When `map_folders_to_subcollections = true` on `[sync.bookmarks]`, X bookmark
+folders are mirrored as Raindrop subcollections under the configured parent
+collection. For example, bookmarks in an X folder named `Test` are stored in a
+child collection also named `Test`. The child collection is created if it does
+not already exist. Unfiled bookmarks stay in the parent collection. This option
+requires a regular Raindrop collection (not All / Unsorted / Trash).
 
 CLI flags override config when passed. Boolean flags are tri-state, so
 `--no-remove-from-x` and `--no-dry-run` clear values that are enabled in config.
@@ -351,6 +360,8 @@ The tool stores data in the current working directory:
 **API Request Breakdown:**
 - Fetching bookmarks: 1 request per 100 bookmarks (paginated)
 - Fetching liked posts: 1 request per 100 likes (paginated)
+- Listing bookmark folders: 1 request per 100 folders (when mapping folders)
+- Listing bookmarks in a folder: 1 request per folder (when mapping folders)
 - Deleting a bookmark / unliking a post: 1 request per item
 
 **Rate Limit Behavior:**

@@ -89,6 +89,25 @@ class TestMockXClient:
         assert len(liked) == 3
         assert liked[0].tweet_id == "1111111111"
 
+    def test_get_bookmark_folders_returns_configured(self) -> None:
+        """Test get_bookmark_folders returns configured folders."""
+        from x2raindrop_cli.models import BookmarkFolder
+
+        folders = [BookmarkFolder(id="folder-1", name="Test")]
+        client = MockXClient(bookmark_folders=folders)
+
+        result = client.get_bookmark_folders()
+
+        assert result == folders
+
+    def test_get_bookmark_ids_in_folder(self) -> None:
+        """Test get_bookmark_ids_in_folder returns configured tweet IDs."""
+        client = MockXClient(folder_bookmark_ids={"folder-1": ["111", "222"]})
+
+        result = client.get_bookmark_ids_in_folder("folder-1")
+
+        assert result == ["111", "222"]
+
 
 class TestXClientParsing:
     """Tests for XClient tweet parsing helpers."""
@@ -169,6 +188,34 @@ class TestXClientParsing:
             assert urls_null_list == ["https://example.org/page"]
         finally:
             client.close()
+
+    def test_parse_folder_requires_name(self) -> None:
+        """Test folder parsing skips items without a name."""
+        from datetime import datetime, timedelta
+
+        from x2raindrop_cli.x.auth_pkce import OAuth2Token
+        from x2raindrop_cli.x.client import XClient
+
+        token = OAuth2Token(
+            access_token="test",
+            refresh_token=None,
+            token_type="bearer",
+            expires_at=datetime.now() + timedelta(hours=1),
+            scope="tweet.read",
+        )
+        client = XClient(token)
+        try:
+            parsed = client._parse_folder({"id": "folder-1", "name": "Test"})
+            skipped = client._parse_folder({"id": "folder-2", "name": "  "})
+            tweet_id = client._extract_item_id({"id": 12345})
+        finally:
+            client.close()
+
+        assert parsed is not None
+        assert parsed.id == "folder-1"
+        assert parsed.name == "Test"
+        assert skipped is None
+        assert tweet_id == "12345"
 
 
 class TestBookmarkItemParsing:

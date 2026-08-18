@@ -155,6 +155,44 @@ class TestSyncFlagOverrides:
         assert result.exit_code == 0, result.stdout
         assert captured["remove_from_x"] is True
 
+    def test_map_folders_to_subcollections_sets_true(self, temp_dir: Path) -> None:
+        """Test --map-folders-to-subcollections overrides config false."""
+        config_path = temp_dir / "config.toml"
+        create_default_config(config_path)
+        text = config_path.read_text()
+        text = text.replace('token = "YOUR_RAINDROP_TOKEN"', 'token = "test-raindrop-token"')
+        text = text.replace(
+            'collection_title = ""\ntags = [\n    "x-bookmark"',
+            'collection_id = 12345\ncollection_title = ""\ntags = [\n    "x-bookmark"',
+            1,
+        )
+        config_path.write_text(text)
+        captured: dict[str, Any] = {}
+
+        def fake_sync(self: Any, progress_callback: Any = None) -> SyncResult:
+            del progress_callback
+            captured["map_folders"] = self.settings.bookmarks.map_folders_to_subcollections
+            return SyncResult()
+
+        with (
+            patch("x2raindrop_cli.cli._get_x_token", return_value=MagicMock()),
+            patch("x2raindrop_cli.cli.XClient") as mock_x_cls,
+            patch("x2raindrop_cli.cli.RaindropClient") as mock_rd_cls,
+            patch("x2raindrop_cli.cli.SyncService.sync", fake_sync),
+        ):
+            mock_x = MagicMock()
+            mock_x.request_count = 0
+            mock_x_cls.return_value = mock_x
+            mock_rd_cls.return_value = MagicMock()
+
+            result = runner.invoke(
+                app,
+                ["sync", "--config", str(config_path), "--map-folders-to-subcollections"],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        assert captured["map_folders"] is True
+
     def test_sync_requires_raindrop_token(self, temp_dir: Path) -> None:
         """Test sync fails when Raindrop token is missing."""
         config_path = temp_dir / "config.toml"

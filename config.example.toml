@@ -37,6 +37,7 @@ remove_from_x = false
 skip_existing_links = true
 link_mode = "permalink"
 both_behavior = "one_external_plus_note"
+map_folders_to_subcollections = false
 
 [sync.likes]
 enabled = false

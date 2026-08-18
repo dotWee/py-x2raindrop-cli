@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from x2raindrop_cli.models import BookmarkItem, RaindropCreateRequest
+from x2raindrop_cli.models import BookmarkFolder, BookmarkItem, RaindropCreateRequest
 from x2raindrop_cli.raindrop.client import CreatedRaindrop, RaindropCollection, normalize_link
 
 
@@ -23,6 +23,8 @@ class MockXClient:
         bookmarks: list[BookmarkItem] | None = None,
         liked_posts: list[BookmarkItem] | None = None,
         user_id: str = "123456789",
+        bookmark_folders: list[BookmarkFolder] | None = None,
+        folder_bookmark_ids: dict[str, list[str]] | None = None,
     ) -> None:
         """Initialize mock client.
 
@@ -30,12 +32,16 @@ class MockXClient:
             bookmarks: List of bookmarks to return.
             liked_posts: List of liked posts to return.
             user_id: Fake user ID to return.
+            bookmark_folders: X bookmark folders to return.
+            folder_bookmark_ids: Mapping of folder ID to tweet IDs in that folder.
         """
         self.bookmarks = bookmarks or []
         self.liked_posts = liked_posts or []
         self.user_id = user_id
         self.deleted_tweet_ids: list[str] = []
         self.unliked_tweet_ids: list[str] = []
+        self.bookmark_folders = bookmark_folders or []
+        self.folder_bookmark_ids = folder_bookmark_ids or {}
 
     def get_authenticated_user_id(self) -> str:
         """Get the mock user ID."""
@@ -48,6 +54,14 @@ class MockXClient:
     def get_liked_posts(self, max_results: int | None = None) -> Iterator[BookmarkItem]:
         """Yield pre-configured liked posts."""
         yield from self._yield_items(self.liked_posts, max_results)
+
+    def get_bookmark_folders(self) -> list[BookmarkFolder]:
+        """Return pre-configured bookmark folders."""
+        return list(self.bookmark_folders)
+
+    def get_bookmark_ids_in_folder(self, folder_id: str) -> list[str]:
+        """Return pre-configured tweet IDs for a bookmark folder."""
+        return list(self.folder_bookmark_ids.get(folder_id, []))
 
     def _yield_items(
         self,
@@ -95,7 +109,9 @@ class MockRaindropClient:
         ]
         self.created_raindrops: list[RaindropCreateRequest] = []
         self.batch_create_calls: list[list[RaindropCreateRequest]] = []
+        self.created_collections: list[RaindropCollection] = []
         self._next_id = 1
+        self._next_collection_id = 90000
         self.existing_links = {normalize_link(link) for link in existing_links or []}
         self.list_collection_links_calls: list[int] = []
 
@@ -128,12 +144,26 @@ class MockRaindropClient:
         self.batch_create_calls.append(list(requests))
         return [self.create_raindrop(request) for request in requests]
 
+    def create_collection(self, title: str, parent_id: int) -> RaindropCollection:
+        """Create and track a child collection."""
+        collection = RaindropCollection(
+            id=self._next_collection_id,
+            title=title,
+            count=0,
+            parent_id=parent_id,
+        )
+        self._next_collection_id += 1
+        self.collections.append(collection)
+        self.created_collections.append(collection)
+        return collection
+
     def list_collection_links(self, collection_id: int) -> set[str]:
         """Return configured existing links plus links created in this session."""
         self.list_collection_links_calls.append(collection_id)
         links = set(self.existing_links)
         for request in self.created_raindrops:
-            links.add(normalize_link(request.link))
+            if request.collection_id == collection_id:
+                links.add(normalize_link(request.link))
         return links
 
     def check_link_exists(self, link: str, collection_id: int | None = None) -> bool:
